@@ -12,8 +12,8 @@ android {
         applicationId = "com.dove.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.0.2"
+        versionCode = 3
+        versionName = "0.0.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -37,32 +37,34 @@ android {
     buildFeatures {
         compose = true
     }
+    packaging {
+        jniLibs {
+            useLegacyPackaging = false
+        }
+    }
 }
 
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("com.google.android.material:material:1.12.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.4")
-    implementation("androidx.activity:activity-compose:1.9.1")
-    implementation(platform("androidx.compose:compose-bom:2024.08.00"))
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
+    implementation("androidx.activity:activity-compose:1.9.3")
+    implementation(platform("androidx.compose:compose-bom:2024.10.00"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
 
-    // CameraX for high-FPS optical QR scanning
-    val cameraxVersion = "1.3.4"
+    // CameraX 1.4.1 with native 16 KB page-size alignment for Android 15 / Pixel 9
+    val cameraxVersion = "1.4.1"
     implementation("androidx.camera:camera-core:$cameraxVersion")
     implementation("androidx.camera:camera-camera2:$cameraxVersion")
     implementation("androidx.camera:camera-lifecycle:$cameraxVersion")
     implementation("androidx.camera:camera-view:$cameraxVersion")
 
-    // Optical barcode scanning
-    implementation("com.google.mlkit:barcode-scanning:17.3.0")
-
-    // QR generation on phone
+    // Pure Java QR Code engine (100% air-gapped, zero C++ native .so, zero page alignment issues)
     implementation("com.google.zxing:core:3.5.3")
 }
