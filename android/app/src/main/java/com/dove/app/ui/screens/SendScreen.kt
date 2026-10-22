@@ -2,6 +2,7 @@ package com.dove.app.ui.screens
 
 import android.graphics.Bitmap
 import android.graphics.Color as AndroidColor
+import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -19,11 +20,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dove.app.crypto.Crypto
 import com.dove.app.fountain.Symbol
+import com.dove.app.fountain.pickIndices
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import kotlinx.coroutines.delay
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.security.SecureRandom
-import android.util.Base64
 
 @Composable
 fun SendScreen() {
@@ -48,20 +51,59 @@ fun SendScreen() {
 
     LaunchedEffect(isStreaming) {
         if (isStreaming && selectedFileBytes != null) {
+            val fileName = selectedFileName ?: "file.bin"
+            val fileNameBytes = fileName.toByteArray(Charsets.UTF_8)
+            val fileBytes = selectedFileBytes!!
+
+            // Pack metadata: [2 bytes fileNameLen][fileName][fileBytes]
+            val packedData = ByteBuffer.allocate(2 + fileNameBytes.size + fileBytes.size)
+                .order(ByteOrder.BIG_ENDIAN)
+                .putShort(fileNameBytes.size.toShort())
+                .put(fileNameBytes)
+                .put(fileBytes)
+                .array()
+
             val key = ByteArray(32)
             SecureRandom().nextBytes(key)
-            val encrypted = Crypto.encrypt(selectedFileBytes!!, key)
-            val fullPayload = key + encrypted
+            val encrypted = Crypto.encrypt(packedData, key)
+
+            // Inner payload: [key (32)][encrypted]
+            val innerPayload = key + encrypted
+
+            // Exact payload: [4 bytes innerPayloadLen][innerPayload]
+            val fullPayload = ByteBuffer.allocate(4 + innerPayload.size)
+                .order(ByteOrder.BIG_ENDIAN)
+                .putInt(innerPayload.size)
+                .put(innerPayload)
+                .array()
 
             val sessionId = SecureRandom().nextLong()
-            val chunkSize = 300
+            val chunkSize = 128
             val totalChunks = (fullPayload.size + chunkSize - 1) / chunkSize
-            var seed = 1L
 
+            // Slice fullPayload into fixed-size chunks
+            val chunks = Array(totalChunks) { i ->
+                val start = i * chunkSize
+                val end = minOf(start + chunkSize, fullPayload.size)
+                val chunk = ByteArray(chunkSize)
+                System.arraycopy(fullPayload, start, chunk, 0, end - start)
+                chunk
+            }
+
+            var seed = 1L
             val writer = QRCodeWriter()
 
             while (isStreaming) {
-                val symbol = Symbol(sessionId, totalChunks, chunkSize, seed++, fullPayload.copyOfRange(0, minOf(chunkSize, fullPayload.size)))
+                val indices = pickIndices(seed, totalChunks)
+                val combined = ByteArray(chunkSize)
+                for (idx in indices) {
+                    val src = chunks[idx]
+                    for (b in 0 until chunkSize) {
+                        combined[b] = (combined[b].toInt() xor src[b].toInt()).toByte()
+                    }
+                }
+
+                val symbol = Symbol(sessionId, totalChunks, chunkSize, seed++, combined)
                 val raw = Base64.encodeToString(symbol.serialize(), Base64.NO_WRAP)
 
                 try {
@@ -76,8 +118,8 @@ fun SendScreen() {
                     }
                     currentBitmap = bmp
                     currentFrameIndex++
-                } catch (e: Exception) {
-                    // Ignore optical rendering skip
+                } catch (_: Exception) {
+                    // Skip frame on draw failure
                 }
                 delay(70) // ~14 FPS
             }
@@ -138,7 +180,7 @@ fun SendScreen() {
             Box(
                 modifier = Modifier
                     .size(320.dp)
-                    .background(androidx.compose.ui.graphics.Color.White, RoundedCornerShape(6.dp))
+                    .background(androidx.compose.ui.graphics.Color.White, RoundedCornerShape(8.dp))
                     .padding(16.dp),
                 contentAlignment = Alignment.Center
             ) {

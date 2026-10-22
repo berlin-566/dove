@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"hash/crc32"
-	"math/rand"
 )
 
 const (
@@ -75,8 +74,7 @@ func (e *Encoder) NextSymbol() *Symbol {
 	seed := e.CurrentSeed
 	e.CurrentSeed++
 
-	r := rand.New(rand.NewSource(int64(seed)))
-	indices := pickIndices(r, int(e.TotalChunks))
+	indices := pickIndices(seed, int(e.TotalChunks))
 
 	combined := make([]byte, e.ChunkSize)
 	for _, idx := range indices {
@@ -182,8 +180,7 @@ func (d *Decoder) AddSymbol(sym *Symbol) bool {
 		return false
 	}
 
-	r := rand.New(rand.NewSource(int64(sym.Seed)))
-	rawIndices := pickIndices(r, d.TotalChunks)
+	rawIndices := pickIndices(sym.Seed, d.TotalChunks)
 
 	entry := &SymbolEntry{
 		Indices: make(map[int]bool),
@@ -265,15 +262,47 @@ func (d *Decoder) Reconstruct(originalLen int) []byte {
 	return out
 }
 
-// pickIndices chooses a subset of chunk indices according to a Soliton distribution.
-func pickIndices(r *rand.Rand, k int) []int {
+// KnuthLCG provides a 64-bit deterministic linear congruential generator matching Kotlin.
+type KnuthLCG struct {
+	state uint64
+}
+
+func NewKnuthLCG(seed uint64) *KnuthLCG {
+	if seed == 0 {
+		seed = 0x123456789ABCDEF
+	}
+	return &KnuthLCG{state: seed}
+}
+
+func (l *KnuthLCG) Next() uint64 {
+	l.state = l.state*6364136223846793005 + 1442695040888963407
+	return l.state >> 1
+}
+
+func (l *KnuthLCG) NextInt(bound int) int {
+	if bound <= 1 {
+		return 0
+	}
+	return int(l.Next() % uint64(bound))
+}
+
+// pickIndices chooses a subset of chunk indices according to systematic phase + Soliton distribution.
+func pickIndices(seed uint32, k int) []int {
 	if k <= 1 {
 		return []int{0}
 	}
 
-	// Degree distribution: 1 with high probability (1/k), then Soliton degrees
-	degree := 1
-	p := r.Float64()
+	// Systematic phase: first K symbols represent single chunks directly
+	if int(seed) <= k && seed > 0 {
+		return []int{int(seed - 1)}
+	}
+
+	// Rateless repair phase: deterministic degree and indices
+	lcg := NewKnuthLCG(uint64(seed))
+
+	// Degree distribution: 1 with probability 1/k, else 2..k
+	degree := 2
+	p := float64(lcg.NextInt(10000)) / 10000.0
 	if p > (1.0 / float64(k)) {
 		d := int(float64(k) * (1.0 - p))
 		if d < 2 {
@@ -285,8 +314,19 @@ func pickIndices(r *rand.Rand, k int) []int {
 		degree = d
 	}
 
-	perm := r.Perm(k)
-	return perm[:degree]
+	available := make([]int, k)
+	for i := 0; i < k; i++ {
+		available[i] = i
+	}
+
+	result := make([]int, degree)
+	for i := 0; i < degree; i++ {
+		idx := lcg.NextInt(len(available))
+		result[i] = available[idx]
+		available = append(available[:idx], available[idx+1:]...)
+	}
+
+	return result
 }
 
 func xorBytes(dst, src []byte) {

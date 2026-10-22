@@ -2,7 +2,6 @@ package com.dove.app.fountain
 
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import java.util.Random
 import java.util.zip.CRC32
 
 const val MAGIC_BYTE_1: Byte = 0x44 // 'D'
@@ -62,6 +61,52 @@ data class Symbol(
             return Symbol(sessionId, totalChunks, chunkSize, seed, data)
         }
     }
+}
+
+// KnuthLCG matches Go's 64-bit deterministic PRNG implementation exactly.
+class KnuthLCG(seed: Long) {
+    private var state: Long = if (seed == 0L) 0x123456789ABCDEFL else seed
+
+    fun next(): Long {
+        state = (state * 6364136223846793005L + 1442695040888963407L)
+        return state ushr 1
+    }
+
+    fun nextInt(bound: Int): Int {
+        if (bound <= 1) return 0
+        val v = next()
+        val pos = if (v < 0) v and Long.MAX_VALUE else v
+        return (pos % bound).toInt()
+    }
+}
+
+fun pickIndices(seed: Long, k: Int): List<Int> {
+    if (k <= 1) return listOf(0)
+
+    val sInt = seed.toInt()
+    // Systematic phase: first K symbols represent single chunks directly
+    if (sInt in 1..k) {
+        return listOf(sInt - 1)
+    }
+
+    // Rateless repair phase: deterministic degree and indices
+    val lcg = KnuthLCG(seed)
+    var degree = 2
+    val p = lcg.nextInt(10000).toDouble() / 10000.0
+    if (p > (1.0 / k.toDouble())) {
+        var d = (k * (1.0 - p)).toInt()
+        if (d < 2) d = 2
+        if (d > k) d = k
+        degree = d
+    }
+
+    val available = (0 until k).toMutableList()
+    val result = mutableListOf<Int>()
+    for (i in 0 until degree) {
+        val idx = lcg.nextInt(available.size)
+        result.add(available.removeAt(idx))
+    }
+    return result
 }
 
 class FountainDecoder(
@@ -141,28 +186,6 @@ class FountainDecoder(
         }
         return out.array()
     }
-}
-
-private fun pickIndices(seed: Long, k: Int): List<Int> {
-    if (k <= 1) return listOf(0)
-    val rand = Random(seed)
-
-    var degree = 1
-    val p = rand.nextDouble()
-    if (p > (1.0 / k)) {
-        var d = (k * (1.0 - p)).toInt()
-        if (d < 2) d = 2
-        if (d > k) d = k
-        degree = d
-    }
-
-    val indices = (0 until k).toMutableList()
-    val result = mutableListOf<Int>()
-    for (i in 0 until degree) {
-        val pickIndex = rand.nextInt(indices.size)
-        result.add(indices.removeAt(pickIndex))
-    }
-    return result
 }
 
 private fun xorBytes(dst: ByteArray, src: ByteArray) {

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -117,6 +118,18 @@ func RunGet(args []string) error {
 				decryptedData, err := crypto.Decrypt(encryptedData, key)
 				if err != nil {
 					return fmt.Errorf("decryption failed: %w", err)
+				}
+
+				// Unpack embedded metadata header if present
+				if len(decryptedData) > 2 {
+					nameLen := int(binary.BigEndian.Uint16(decryptedData[:2]))
+					if nameLen > 0 && 2+nameLen <= len(decryptedData) {
+						embeddedName := string(decryptedData[2 : 2+nameLen])
+						if !strings.ContainsAny(embeddedName, "/\\:\x00") && len(embeddedName) < 255 {
+							fileName = embeddedName
+							decryptedData = decryptedData[2+nameLen:]
+						}
+					}
 				}
 
 				outPath := filepath.Join(outputDir, fileName)

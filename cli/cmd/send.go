@@ -103,8 +103,16 @@ func RunSend(args []string) error {
 		}
 	}
 
-	// Encrypt file
-	encryptedData, err := crypto.Encrypt(rawBytes, key)
+	// Pack metadata header: [2 bytes fileNameLen][fileName][rawBytes]
+	fileName := filepath.Base(filePath)
+	fileNameBytes := []byte(fileName)
+	packedData := make([]byte, 2+len(fileNameBytes)+len(rawBytes))
+	binary.BigEndian.PutUint16(packedData[0:2], uint16(len(fileNameBytes)))
+	copy(packedData[2:2+len(fileNameBytes)], fileNameBytes)
+	copy(packedData[2+len(fileNameBytes):], rawBytes)
+
+	// Encrypt packed payload
+	encryptedData, err := crypto.Encrypt(packedData, key)
 	if err != nil {
 		return fmt.Errorf("encryption failed: %w", err)
 	}
@@ -119,7 +127,7 @@ func RunSend(args []string) error {
 		finalPayload = encryptedData
 	}
 
-	chunkSize := 320
+	chunkSize := 128
 	encoder := fountain.NewEncoder(sessionID, finalPayload, chunkSize)
 
 	// Pre-generate a burst of fountain frames (e.g. 2x K or 200 minimum)

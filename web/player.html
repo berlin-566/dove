@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Dove: Optical Stream Player</title>
   <link rel="stylesheet" href="assets/style.css">
-  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+  <script src="assets/qrcode.min.js"></script>
 </head>
 <body>
   <header>
@@ -33,7 +33,7 @@
       </div>
 
       <div class="qr-viewport" id="viewport">
-        <canvas id="qr-canvas" class="qr-canvas" width="332" height="332"></canvas>
+        <canvas id="qr-canvas" class="qr-canvas" width="400" height="400"></canvas>
       </div>
 
       <div class="controls-bar">
@@ -108,12 +108,11 @@
 
     function renderFrame(rawText) {
       if (typeof qrcode === 'undefined') {
-        // Fallback: simple text display if offline without CDN
-        ctx.fillStyle = '#000000';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.fillStyle = '#ffffff';
-        ctx.font = '12px monospace';
-        ctx.fillText('Frame: ' + currentFrameIndex, 20, 40);
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#000000';
+        ctx.font = '14px monospace';
+        ctx.fillText('Loading QR engine...', 40, 200);
         return;
       }
 
@@ -122,7 +121,10 @@
       qr.make();
 
       const moduleCount = qr.getModuleCount();
-      const cellSize = canvas.width / moduleCount;
+      const quietZone = 4;
+      const totalModules = moduleCount + (quietZone * 2);
+      const cellSize = Math.floor(canvas.width / totalModules);
+      const offset = Math.floor((canvas.width - (totalModules * cellSize)) / 2) + (quietZone * cellSize);
 
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -131,7 +133,7 @@
       for (let row = 0; row < moduleCount; row++) {
         for (let col = 0; col < moduleCount; col++) {
           if (qr.isDark(row, col)) {
-            ctx.fillRect(col * cellSize, row * cellSize, Math.ceil(cellSize), Math.ceil(cellSize));
+            ctx.fillRect(offset + (col * cellSize), offset + (row * cellSize), cellSize, cellSize);
           }
         }
       }
