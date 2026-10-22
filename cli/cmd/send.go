@@ -90,7 +90,7 @@ func RunSend(args []string) error {
 
 	var sessionRand [8]byte
 	_, _ = rand.Read(sessionRand[:])
-	sessionID := binary.BigEndian.Uint64(sessionRand[:])
+	sessionID := binary.BigEndian.Uint64(sessionRand[:]) & 0x7FFFFFFFFFFFFFFF
 
 	var key []byte
 	if pin != "" {
@@ -118,25 +118,38 @@ func RunSend(args []string) error {
 	}
 
 	// Prepend key if no pin is specified (seamless optical decryption)
-	var finalPayload []byte
+	var innerPayload []byte
 	if pin == "" {
-		finalPayload = make([]byte, len(key)+len(encryptedData))
-		copy(finalPayload[:len(key)], key)
-		copy(finalPayload[len(key):], encryptedData)
+		innerPayload = make([]byte, len(key)+len(encryptedData))
+		copy(innerPayload[:len(key)], key)
+		copy(innerPayload[len(key):], encryptedData)
 	} else {
-		finalPayload = encryptedData
+		innerPayload = encryptedData
 	}
 
+	// Final payload with exact length header: [4 bytes innerPayloadLen][innerPayload]
+	finalPayload := make([]byte, 4+len(innerPayload))
+	binary.BigEndian.PutUint32(finalPayload[0:4], uint32(len(innerPayload)))
+	copy(finalPayload[4:], innerPayload)
+
+	payloadLen := len(finalPayload)
 	chunkSize := 128
+	if payloadLen > 50000 {
+		chunkSize = 256
+	}
+	if payloadLen > 200000 {
+		chunkSize = 320
+	}
+
 	encoder := fountain.NewEncoder(sessionID, finalPayload, chunkSize)
 
-	// Pre-generate a burst of fountain frames (e.g. 2x K or 200 minimum)
-	frameCount := int(encoder.TotalChunks) * 3
-	if frameCount < 100 {
-		frameCount = 100
+	// Pre-generate enough fountain frames to guarantee complete reconstruction
+	frameCount := int(encoder.TotalChunks)*2 + 50
+	if frameCount < 150 {
+		frameCount = 150
 	}
-	if frameCount > 500 {
-		frameCount = 500
+	if frameCount > 2000 {
+		frameCount = 2000
 	}
 
 	frames := make([]string, frameCount)
@@ -169,9 +182,12 @@ func RunSend(args []string) error {
 		return fmt.Errorf("failed to allocate port: %w", err)
 	}
 
-	// Write session file into webDir/sessions/
+	// Write session file into webDir/sessions/ with fallback
 	sessionsDir := filepath.Join(webDir, "sessions")
-	_ = os.MkdirAll(sessionsDir, 0755)
+	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
+		sessionsDir = filepath.Join(os.TempDir(), "dove-sessions")
+		_ = os.MkdirAll(sessionsDir, 0755)
+	}
 
 	sessionFile := filepath.Join(sessionsDir, fmt.Sprintf("%d.json", sessionID))
 	payload := SessionPayload{
@@ -190,7 +206,12 @@ func RunSend(args []string) error {
 		return fmt.Errorf("failed to serialize session metadata: %w", err)
 	}
 	if err := os.WriteFile(sessionFile, data, 0644); err != nil {
-		return fmt.Errorf("failed to save session state: %w", err)
+		sessionsDir = filepath.Join(os.TempDir(), "dove-sessions")
+		_ = os.MkdirAll(sessionsDir, 0755)
+		sessionFile = filepath.Join(sessionsDir, fmt.Sprintf("%d.json", sessionID))
+		if err2 := os.WriteFile(sessionFile, data, 0644); err2 != nil {
+			return fmt.Errorf("failed to save session state: %w (fallback error: %v)", err, err2)
+		}
 	}
 	defer os.Remove(sessionFile)
 

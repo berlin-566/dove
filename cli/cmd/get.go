@@ -50,7 +50,7 @@ func RunGet(args []string) error {
 
 	var sessionRand [8]byte
 	_, _ = rand.Read(sessionRand[:])
-	sessionID := binary.BigEndian.Uint64(sessionRand[:])
+	sessionID := binary.BigEndian.Uint64(sessionRand[:]) & 0x7FFFFFFFFFFFFFFF
 
 	sessionsDir := filepath.Join(webDir, "sessions")
 	_ = os.MkdirAll(sessionsDir, 0755)

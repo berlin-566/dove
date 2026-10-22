@@ -330,45 +330,52 @@ fun ReceiveScreen(lifecycleOwner: LifecycleOwner) {
 
                                                 if (complete && completedResult == null) {
                                                     val reconstructed = currentDecoder.reconstruct()
-                                                    if (reconstructed.size >= 4 + 32 + 12) {
+                                                    if (reconstructed.size >= 44) {
                                                         val buf = ByteBuffer.wrap(reconstructed).order(ByteOrder.BIG_ENDIAN)
-                                                        val exactLen = buf.int
+                                                        val candidateLen = buf.int
 
-                                                        if (exactLen in 44..(reconstructed.size - 4)) {
-                                                            val innerPayload = ByteArray(exactLen)
-                                                            buf.get(innerPayload)
+                                                        val (key, ciphertext) = if (candidateLen in 44..(reconstructed.size - 4)) {
+                                                            val inner = ByteArray(candidateLen)
+                                                            buf.get(inner)
+                                                            Pair(inner.copyOfRange(0, 32), inner.copyOfRange(32, candidateLen))
+                                                        } else {
+                                                            Pair(reconstructed.copyOfRange(0, 32), reconstructed.copyOfRange(32, reconstructed.size))
+                                                        }
 
-                                                            val key = innerPayload.copyOfRange(0, 32)
-                                                            val ciphertext = innerPayload.copyOfRange(32, exactLen)
+                                                        try {
                                                             val decrypted = Crypto.decrypt(ciphertext, key)
-
                                                             if (decrypted.size >= 2) {
                                                                 val decBuf = ByteBuffer.wrap(decrypted).order(ByteOrder.BIG_ENDIAN)
                                                                 val nameLen = decBuf.short.toInt() and 0xFFFF
 
-                                                                if (nameLen in 1..(decrypted.size - 2)) {
+                                                                val (fileName, fileData) = if (nameLen in 1..(decrypted.size - 2)) {
                                                                     val nameBytes = ByteArray(nameLen)
                                                                     decBuf.get(nameBytes)
-                                                                    val fileName = String(nameBytes, Charsets.UTF_8)
-                                                                    val fileData = ByteArray(decrypted.size - 2 - nameLen)
-                                                                    decBuf.get(fileData)
-
-                                                                    saveToDownloads(ctx, fileName, fileData)
-
-                                                                    val lower = fileName.lowercase()
-                                                                    val isImg = lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".webp")
-                                                                    val textPreview = if (!isImg && (lower.endsWith(".txt") || lower.endsWith(".md") || lower.endsWith(".json") || lower.endsWith(".csv"))) {
-                                                                        String(fileData, Charsets.UTF_8).take(2000)
-                                                                    } else null
-
-                                                                    completedResult = ReceivedFileResult(
-                                                                        fileName = fileName,
-                                                                        data = fileData,
-                                                                        isImage = isImg,
-                                                                        textContent = textPreview
-                                                                    )
+                                                                    val nameStr = String(nameBytes, Charsets.UTF_8)
+                                                                    val dataBytes = ByteArray(decrypted.size - 2 - nameLen)
+                                                                    decBuf.get(dataBytes)
+                                                                    Pair(nameStr, dataBytes)
+                                                                } else {
+                                                                    Pair("received_${System.currentTimeMillis()}.bin", decrypted)
                                                                 }
+
+                                                                saveToDownloads(ctx, fileName, fileData)
+
+                                                                val lower = fileName.lowercase()
+                                                                val isImg = lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".webp")
+                                                                val textPreview = if (!isImg && (lower.endsWith(".txt") || lower.endsWith(".md") || lower.endsWith(".json") || lower.endsWith(".csv"))) {
+                                                                    String(fileData, Charsets.UTF_8).take(2000)
+                                                                } else null
+
+                                                                completedResult = ReceivedFileResult(
+                                                                    fileName = fileName,
+                                                                    data = fileData,
+                                                                    isImage = isImg,
+                                                                    textContent = textPreview
+                                                                )
                                                             }
+                                                        } catch (_: Exception) {
+                                                            // Tag mismatch or corruption, await additional symbols
                                                         }
                                                     }
                                                 }

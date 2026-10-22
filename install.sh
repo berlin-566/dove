@@ -79,6 +79,8 @@ install_from_release() {
   curl -fsSL "https://raw.githubusercontent.com/${REPO}/main/web/scanner.html" -o "${WEB_DEST}/scanner.html"
   mkdir -p "${WEB_DEST}/assets"
   curl -fsSL "https://raw.githubusercontent.com/${REPO}/main/web/assets/style.css" -o "${WEB_DEST}/assets/style.css"
+  curl -fsSL "https://raw.githubusercontent.com/${REPO}/main/web/assets/qrcode.min.js" -o "${WEB_DEST}/assets/qrcode.min.js"
+  curl -fsSL "https://raw.githubusercontent.com/${REPO}/main/web/assets/jsQR.min.js" -o "${WEB_DEST}/assets/jsQR.min.js"
 }
 
 install_from_source() {

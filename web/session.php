@@ -13,6 +13,12 @@ $sessionsDir = __DIR__ . '/sessions';
 if (!is_dir($sessionsDir)) {
     @mkdir($sessionsDir, 0755, true);
 }
+if (!is_dir($sessionsDir) || !is_writable($sessionsDir)) {
+    $sessionsDir = sys_get_temp_dir() . '/dove-sessions';
+    if (!is_dir($sessionsDir)) {
+        @mkdir($sessionsDir, 0755, true);
+    }
+}
 
 $action = $_GET['action'] ?? $_POST['action'] ?? 'status';
 $sessionId = preg_replace('/[^0-9]/', '', (string)($_GET['session'] ?? $_POST['session'] ?? ''));
