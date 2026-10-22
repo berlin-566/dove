@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+      - 'Dove-v*'
   workflow_dispatch:
 
 permissions:
