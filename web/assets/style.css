@@ -1,0 +1,226 @@
+/* Dove System Design System - GitHub Inspired Matte Black Theme */
+:root {
+  --bg-canvas: #010409;
+  --bg-surface: #0d1117;
+  --bg-surface-secondary: #161b22;
+  --border-default: #30363d;
+  --border-muted: #21262d;
+  --text-primary: #c9d1d9;
+  --text-secondary: #8b949e;
+  --accent-blue: #58a6ff;
+  --accent-green: #238636;
+  --accent-green-hover: #2ea043;
+  --accent-red: #da3633;
+  --font-stack: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg-canvas);
+  color: var(--text-primary);
+  font-family: var(--font-stack);
+  font-size: 14px;
+  line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+header {
+  background-color: var(--bg-surface);
+  border-bottom: 1px solid var(--border-default);
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.logo-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logo-badge {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.5px;
+  background-color: var(--bg-surface-secondary);
+  border: 1px solid var(--border-default);
+  padding: 3px 8px;
+  border-radius: 6px;
+  color: var(--accent-blue);
+}
+
+.brand-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.main-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  max-width: 800px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.card {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  padding: 20px;
+  width: 100%;
+  margin-bottom: 16px;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border-muted);
+  padding-bottom: 12px;
+}
+
+.card-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.meta-item strong {
+  color: var(--text-primary);
+}
+
+.qr-viewport {
+  background-color: #ffffff;
+  border-radius: 6px;
+  padding: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 16px auto;
+  width: 380px;
+  height: 380px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.qr-canvas {
+  width: 332px;
+  height: 332px;
+  image-rendering: pixelated;
+}
+
+.camera-viewport {
+  position: relative;
+  width: 100%;
+  max-width: 520px;
+  height: 390px;
+  background-color: #000000;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  overflow: hidden;
+  margin: 0 auto 16px;
+}
+
+.camera-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.camera-reticle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 240px;
+  height: 240px;
+  border: 2px dashed var(--accent-green);
+  border-radius: 8px;
+  pointer-events: none;
+}
+
+.controls-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 16px;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background-color: var(--bg-surface-secondary);
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+}
+
+.btn:hover {
+  background-color: var(--border-muted);
+  border-color: var(--text-secondary);
+}
+
+.btn-primary {
+  background-color: var(--accent-green);
+  border-color: rgba(240, 246, 252, 0.1);
+  color: #ffffff;
+}
+
+.btn-primary:hover {
+  background-color: var(--accent-green-hover);
+}
+
+.progress-container {
+  width: 100%;
+  background-color: var(--bg-surface-secondary);
+  border: 1px solid var(--border-muted);
+  border-radius: 6px;
+  height: 10px;
+  overflow: hidden;
+  margin-top: 12px;
+}
+
+.progress-bar {
+  background-color: var(--accent-green);
+  height: 100%;
+  width: 0%;
+  transition: width 0.1s linear;
+}
+
+footer {
+  border-top: 1px solid var(--border-default);
+  padding: 12px 24px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-secondary);
+}

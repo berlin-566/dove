@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dove: Optical Stream Player</title>
+  <link rel="stylesheet" href="assets/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+</head>
+<body>
+  <header>
+    <div class="logo-group">
+      <span class="logo-badge">DOVE</span>
+      <span class="brand-title">Optical Transmitter</span>
+    </div>
+    <div class="meta-row" id="header-timer">
+      <span>Duration: <strong id="timer-val">Connecting...</strong></span>
+    </div>
+  </header>
+
+  <main class="main-container">
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title" id="file-title">Loading session...</span>
+        <span class="meta-item" id="file-size">-</span>
+      </div>
+
+      <div class="meta-row">
+        <div class="meta-item">Session ID: <strong id="session-display">-</strong></div>
+        <div class="meta-item">Fountain Slices: <strong id="chunk-display">-</strong></div>
+        <div class="meta-item">Frame: <strong id="frame-counter">0 / 0</strong></div>
+        <div class="meta-item">Rate: <strong id="fps-display">14 FPS</strong></div>
+      </div>
+
+      <div class="qr-viewport" id="viewport">
+        <canvas id="qr-canvas" class="qr-canvas" width="332" height="332"></canvas>
+      </div>
+
+      <div class="controls-bar">
+        <button id="toggle-btn" class="btn">Pause Stream</button>
+        <button id="brightness-btn" class="btn">High Contrast</button>
+        <div class="meta-item">Status: <strong id="stream-status" style="color: var(--accent-green);">Broadcasting</strong></div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    Air-Gapped Optical Transmission System &bull; Zero Network Radios Required
+  </footer>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get('session');
+
+    if (!sessionId) {
+      document.getElementById('file-title').innerText = 'Error: Missing session ID in URL';
+      throw new Error('Missing session ID');
+    }
+
+    document.getElementById('session-display').innerText = sessionId;
+
+    let frames = [];
+    let currentFrameIndex = 0;
+    let isPlaying = true;
+    let fps = 14;
+    let intervalId = null;
+    let remainingSeconds = null;
+
+    const canvas = document.getElementById('qr-canvas');
+    const ctx = canvas.getContext('2d');
+
+    async function loadSession() {
+      try {
+        const infoRes = await fetch(`session.php?action=info&session=${sessionId}`);
+        const info = await infoRes.json();
+
+        if (info.error) {
+          document.getElementById('file-title').innerText = info.error;
+          document.getElementById('stream-status').innerText = 'Session Terminated';
+          document.getElementById('stream-status').style.color = 'var(--accent-red)';
+          return;
+        }
+
+        document.getElementById('file-title').innerText = info.file_name;
+        document.getElementById('file-size').innerText = `${info.file_size.toLocaleString()} bytes`;
+        document.getElementById('chunk-display').innerText = `${info.total_chunks} chunks`;
+
+        if (info.remaining_seconds !== null) {
+          remainingSeconds = info.remaining_seconds;
+          updateTimerDisplay();
+          setInterval(tickTimer, 1000);
+        } else {
+          document.getElementById('timer-val').innerText = 'Unlimited (Manual stop)';
+        }
+
+        // Fetch frames
+        const framesRes = await fetch(`session.php?action=frames&session=${sessionId}`);
+        const framesData = await framesRes.json();
+
+        if (framesData.frames && framesData.frames.length > 0) {
+          frames = framesData.frames;
+          startStreaming();
+        }
+      } catch (err) {
+        document.getElementById('file-title').innerText = 'Failed to connect to local session service';
+      }
+    }
+
+    function renderFrame(rawText) {
+      if (typeof qrcode === 'undefined') {
+        // Fallback: simple text display if offline without CDN
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '12px monospace';
+        ctx.fillText('Frame: ' + currentFrameIndex, 20, 40);
+        return;
+      }
+
+      const qr = qrcode(0, 'M');
+      qr.addData(rawText);
+      qr.make();
+
+      const moduleCount = qr.getModuleCount();
+      const cellSize = canvas.width / moduleCount;
+
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = '#000000';
+      for (let row = 0; row < moduleCount; row++) {
+        for (let col = 0; col < moduleCount; col++) {
+          if (qr.isDark(row, col)) {
+            ctx.fillRect(col * cellSize, row * cellSize, Math.ceil(cellSize), Math.ceil(cellSize));
+          }
+        }
+      }
+    }
+
+    function stepStream() {
+      if (!isPlaying || frames.length === 0) return;
+
+      const framePayload = frames[currentFrameIndex % frames.length];
+      currentFrameIndex++;
+      document.getElementById('frame-counter').innerText = `${currentFrameIndex} / ${frames.length}`;
+
+      renderFrame(framePayload);
+    }
+
+    function startStreaming() {
+      if (intervalId) clearInterval(intervalId);
+      intervalId = setInterval(stepStream, 1000 / fps);
+    }
+
+    function tickTimer() {
+      if (remainingSeconds === null) return;
+      if (remainingSeconds <= 0) {
+        document.getElementById('timer-val').innerText = 'Expired (Destroyed)';
+        document.getElementById('stream-status').innerText = 'Session Closed';
+        document.getElementById('stream-status').style.color = 'var(--accent-red)';
+        isPlaying = false;
+        clearInterval(intervalId);
+        return;
+      }
+      remainingSeconds--;
+      updateTimerDisplay();
+    }
+
+    function updateTimerDisplay() {
+      const mins = Math.floor(remainingSeconds / 60);
+      const secs = remainingSeconds % 60;
+      document.getElementById('timer-val').innerText = `${mins}m ${secs < 10 ? '0' : ''}${secs}s`;
+    }
+
+    document.getElementById('toggle-btn').addEventListener('click', () => {
+      isPlaying = !isPlaying;
+      document.getElementById('toggle-btn').innerText = isPlaying ? 'Pause Stream' : 'Resume Stream';
+      document.getElementById('stream-status').innerText = isPlaying ? 'Broadcasting' : 'Paused';
+      document.getElementById('stream-status').style.color = isPlaying ? 'var(--accent-green)' : 'var(--text-secondary)';
+    });
+
+    document.getElementById('brightness-btn').addEventListener('click', () => {
+      document.body.classList.toggle('high-contrast');
+    });
+
+    loadSession();
+  </script>
+</body>
+</html>

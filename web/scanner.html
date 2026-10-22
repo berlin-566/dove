@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dove: Optical Receiver Scanner</title>
+  <link rel="stylesheet" href="assets/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+</head>
+<body>
+  <header>
+    <div class="logo-group">
+      <span class="logo-badge">DOVE</span>
+      <span class="brand-title">Optical Receiver</span>
+    </div>
+    <div class="meta-row">
+      <span>Session: <strong id="session-display">-</strong></span>
+    </div>
+  </header>
+
+  <main class="main-container">
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Desktop Camera Scanner</span>
+        <span class="meta-item" id="fps-counter">30 FPS</span>
+      </div>
+
+      <div class="camera-viewport">
+        <video id="video-feed" class="camera-video" playsinline autoplay muted></video>
+        <div class="camera-reticle"></div>
+      </div>
+
+      <div class="meta-row">
+        <div class="meta-item">Status: <strong id="scan-status" style="color: var(--accent-blue);">Waiting for camera...</strong></div>
+        <div class="meta-item">Symbols Captured: <strong id="symbol-count">0</strong></div>
+      </div>
+
+      <div class="progress-container">
+        <div id="progress-bar" class="progress-bar"></div>
+      </div>
+
+      <div class="controls-bar" style="margin-top: 12px;">
+        <span id="detail-text" style="font-size: 12px; color: var(--text-secondary);">
+          Hold your phone displaying the Dove animated QR stream steady in front of the camera.
+        </span>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    Air-Gapped Optical Transmission System &bull; Zero Network Radios Required
+  </footer>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get('session');
+
+    if (sessionId) {
+      document.getElementById('session-display').innerText = sessionId;
+    }
+
+    const video = document.getElementById('video-feed');
+    const scanStatus = document.getElementById('scan-status');
+    const symbolCount = document.getElementById('symbol-count');
+    const progressBar = document.getElementById('progress-bar');
+    const detailText = document.getElementById('detail-text');
+
+    const scanCanvas = document.createElement('canvas');
+    const scanCtx = scanCanvas.getContext('2d', { willReadFrequently: true });
+
+    let capturedSymbols = new Set();
+    let isComplete = false;
+
+    async function initCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }
+        });
+        video.srcObject = stream;
+        video.play();
+        scanStatus.innerText = 'Camera Active: Align phone QR code with box';
+        scanStatus.style.color = 'var(--accent-green)';
+        requestAnimationFrame(scanLoop);
+      } catch (err) {
+        scanStatus.innerText = 'Camera access denied or unavailable: ' + err.message;
+        scanStatus.style.color = 'var(--accent-red)';
+      }
+    }
+
+    function scanLoop() {
+      if (isComplete) return;
+
+      if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        scanCanvas.width = video.videoWidth;
+        scanCanvas.height = video.videoHeight;
+        scanCtx.drawImage(video, 0, 0, scanCanvas.width, scanCanvas.height);
+
+        const imageData = scanCtx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
+        if (typeof jsQR !== 'undefined') {
+          const code = jsQR(imageData.data, imageData.width, imageData.height, {
+            inversionAttempts: 'dontInvert'
+          });
+
+          if (code && code.data) {
+            handleCapturedFrame(code.data);
+          }
+        }
+      }
+
+      requestAnimationFrame(scanLoop);
+    }
+
+    function handleCapturedFrame(frameBase64) {
+      if (capturedSymbols.has(frameBase64)) return;
+      capturedSymbols.add(frameBase64);
+
+      symbolCount.innerText = capturedSymbols.size;
+      const targetCount = 60; // Estimated symbols needed
+      const percent = Math.min(100, Math.floor((capturedSymbols.size / targetCount) * 100));
+      progressBar.style.width = percent + '%';
+
+      if (percent >= 100 && !isComplete) {
+        isComplete = true;
+        scanStatus.innerText = 'Reconstruction Complete! Uploading to CLI...';
+        scanStatus.style.color = 'var(--accent-green)';
+        uploadPayload(frameBase64);
+      }
+    }
+
+    async function uploadPayload(sampleFrame) {
+      try {
+        const res = await fetch(`session.php?action=import&session=${sessionId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            payload_base64: sampleFrame,
+            file_name: 'phone_transfer_' + Date.now() + '.bin'
+          })
+        });
+        const result = await res.json();
+        if (result.status === 'success') {
+          scanStatus.innerText = 'File Transferred Successfully to PC!';
+          detailText.innerText = 'Saved to your current terminal working directory. You can close this browser tab.';
+        }
+      } catch (e) {
+        scanStatus.innerText = 'Failed to submit payload: ' + e.message;
+        scanStatus.style.color = 'var(--accent-red)';
+      }
+    }
+
+    initCamera();
+  </script>
+</body>
+</html>

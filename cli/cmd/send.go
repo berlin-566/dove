@@ -1,0 +1,257 @@
+package cmd
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/binary"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/berlin-566/dove/pkg/crypto"
+	"github.com/berlin-566/dove/pkg/fountain"
+	"github.com/berlin-566/dove/pkg/qr"
+	"github.com/berlin-566/dove/pkg/server"
+	qrcode "github.com/skip2/go-qrcode"
+)
+
+type SessionPayload struct {
+	SessionID   uint64   `json:"session_id"`
+	FileName    string   `json:"file_name"`
+	FileSize    int64    `json:"file_size"`
+	TotalChunks int      `json:"total_chunks"`
+	ChunkSize   int      `json:"chunk_size"`
+	ExpiresAt   int64    `json:"expires_at"` // 0 if unlimited
+	Frames      []string `json:"frames"`     // Pre-generated fountain frames in base64
+	HasPin      bool     `json:"has_pin"`
+}
+
+// RunSend executes the 'dove send' command logic.
+func RunSend(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("missing target file path. Usage: dove send <filename> [--<N>m] [--terminal]")
+	}
+
+	var filePath string
+	var duration time.Duration
+	var pin string
+	var useTerminal bool
+	fps := 14
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if strings.HasPrefix(arg, "--") && strings.HasSuffix(arg, "m") && len(arg) > 3 {
+			// Minutes format: e.g. --100m, --15m
+			minStr := arg[2 : len(arg)-1]
+			mins, err := strconv.Atoi(minStr)
+			if err != nil {
+				return fmt.Errorf("invalid duration format '%s': expected --<N>m", arg)
+			}
+			duration = time.Duration(mins) * time.Minute
+		} else if arg == "--terminal" {
+			useTerminal = true
+		} else if arg == "--pin" && i+1 < len(args) {
+			pin = args[i+1]
+			i++
+		} else if arg == "--fps" && i+1 < len(args) {
+			f, err := strconv.Atoi(args[i+1])
+			if err == nil && f >= 5 && f <= 30 {
+				fps = f
+			}
+			i++
+		} else if !strings.HasPrefix(arg, "--") && filePath == "" {
+			filePath = arg
+		}
+	}
+
+	if filePath == "" {
+		return fmt.Errorf("missing target file path")
+	}
+
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to open file '%s': %w", filePath, err)
+	}
+	if fileInfo.IsDir() {
+		return fmt.Errorf("path '%s' is a directory; please provide a file", filePath)
+	}
+
+	rawBytes, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to read file '%s': %w", filePath, err)
+	}
+
+	var sessionRand [8]byte
+	_, _ = rand.Read(sessionRand[:])
+	sessionID := binary.BigEndian.Uint64(sessionRand[:])
+
+	var key []byte
+	if pin != "" {
+		salt := []byte(fmt.Sprintf("dove:%d", sessionID))
+		key = crypto.DeriveKeyFromPin(pin, salt)
+	} else {
+		key, err = crypto.GenerateKey()
+		if err != nil {
+			return fmt.Errorf("failed to generate encryption key: %w", err)
+		}
+	}
+
+	// Encrypt file
+	encryptedData, err := crypto.Encrypt(rawBytes, key)
+	if err != nil {
+		return fmt.Errorf("encryption failed: %w", err)
+	}
+
+	// Prepend key if no pin is specified (seamless optical decryption)
+	var finalPayload []byte
+	if pin == "" {
+		finalPayload = make([]byte, len(key)+len(encryptedData))
+		copy(finalPayload[:len(key)], key)
+		copy(finalPayload[len(key):], encryptedData)
+	} else {
+		finalPayload = encryptedData
+	}
+
+	chunkSize := 320
+	encoder := fountain.NewEncoder(sessionID, finalPayload, chunkSize)
+
+	// Pre-generate a burst of fountain frames (e.g. 2x K or 200 minimum)
+	frameCount := int(encoder.TotalChunks) * 3
+	if frameCount < 100 {
+		frameCount = 100
+	}
+	if frameCount > 500 {
+		frameCount = 500
+	}
+
+	frames := make([]string, frameCount)
+	for i := 0; i < frameCount; i++ {
+		sym := encoder.NextSymbol()
+		frames[i] = base64.StdEncoding.EncodeToString(sym.Serialize())
+	}
+
+	var expiresAt int64
+	if duration > 0 {
+		expiresAt = time.Now().Add(duration).Unix()
+	}
+
+	// Trap termination signals
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	if useTerminal {
+		return runTerminalStream(encoder, frames, filePath, len(rawBytes), duration, fps, sigChan)
+	}
+
+	// Web browser mode
+	webDir, err := server.LocateWebDir()
+	if err != nil {
+		return fmt.Errorf("web directory not found: %w\nRun with --terminal to stream in terminal instead", err)
+	}
+
+	port, err := server.FindAvailablePort()
+	if err != nil {
+		return fmt.Errorf("failed to allocate port: %w", err)
+	}
+
+	// Write session file into webDir/sessions/
+	sessionsDir := filepath.Join(webDir, "sessions")
+	_ = os.MkdirAll(sessionsDir, 0755)
+
+	sessionFile := filepath.Join(sessionsDir, fmt.Sprintf("%d.json", sessionID))
+	payload := SessionPayload{
+		SessionID:   sessionID,
+		FileName:    filepath.Base(filePath),
+		FileSize:    fileInfo.Size(),
+		TotalChunks: int(encoder.TotalChunks),
+		ChunkSize:   chunkSize,
+		ExpiresAt:   expiresAt,
+		Frames:      frames,
+		HasPin:      pin != "",
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to serialize session metadata: %w", err)
+	}
+	if err := os.WriteFile(sessionFile, data, 0644); err != nil {
+		return fmt.Errorf("failed to save session state: %w", err)
+	}
+	defer os.Remove(sessionFile)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	srv, err := server.Start(ctx, port, webDir)
+	if err != nil {
+		return fmt.Errorf("failed to start PHP server: %w", err)
+	}
+	defer srv.Stop()
+
+	targetURL := fmt.Sprintf("http://127.0.0.1:%d/player.html?session=%d", port, sessionID)
+	_ = server.OpenBrowser(targetURL)
+
+	fmt.Println("Dove: Optical Stream Active")
+	fmt.Printf("File: %s (%d bytes)\n", filepath.Base(filePath), fileInfo.Size())
+	fmt.Printf("Session ID: %d\n", sessionID)
+	fmt.Printf("Browser URL: %s\n", targetURL)
+	if duration > 0 {
+		fmt.Printf("Duration: %s (auto-destructs at %s)\n", duration, time.Unix(expiresAt, 0).Format("15:04:05"))
+	} else {
+		fmt.Println("Duration: unlimited (press Ctrl+C to terminate)")
+	}
+	fmt.Println("Status: Broadcasting rateless optical fountain. Point Android camera at screen.")
+
+	var timer <-chan time.Time
+	if duration > 0 {
+		timer = time.After(duration)
+	}
+
+	select {
+	case <-timer:
+		fmt.Println("\nSession time expired. Destroying session and terminating server.")
+	case <-sigChan:
+		fmt.Println("\nTermination signal received. Cleaning up session.")
+	}
+
+	return nil
+}
+
+func runTerminalStream(encoder *fountain.Encoder, frames []string, fileName string, size int, duration time.Duration, fps int, sigChan chan os.Signal) error {
+	delay := time.Duration(1000/fps) * time.Millisecond
+	var timer <-chan time.Time
+	if duration > 0 {
+		timer = time.After(duration)
+	}
+
+	frameIndex := 0
+	for {
+		select {
+		case <-timer:
+			fmt.Println("\nSession time expired. Terminating.")
+			return nil
+		case <-sigChan:
+			fmt.Println("\nSession stopped.")
+			return nil
+		default:
+			frameData := frames[frameIndex%len(frames)]
+			frameIndex++
+
+			ansi, err := qr.RenderANSI(frameData, qrcode.Low)
+			if err == nil {
+				fmt.Print("\033[H\033[2J") // Clear terminal screen
+				fmt.Printf("Dove Optical Stream | File: %s (%d bytes) | Frame: %d | FPS: %d\n", filepath.Base(fileName), size, frameIndex, fps)
+				fmt.Println("Scan screen with Dove Android App. Press Ctrl+C to stop.")
+				fmt.Println(ansi)
+			}
+			time.Sleep(delay)
+		}
+	}
+}

@@ -1,0 +1,20 @@
+# Binaries
+dove
+*.exe
+*.dll
+*.so
+*.dylib
+cli/dove
+cli/vendor/
+
+# Temporary sessions
+web/sessions/
+*.bin
+
+# Android build outputs
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+.idea/
+*.iml
