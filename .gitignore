@@ -1,11 +1,12 @@
 # Binaries
-dove
+/dove
 *.exe
 *.dll
 *.so
 *.dylib
 cli/dove
 cli/vendor/
+dist/
 
 # Temporary sessions
 web/sessions/
