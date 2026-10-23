@@ -47,30 +47,41 @@ func RunSend(args []string) error {
 	var useTerminal bool
 	grid := "3x3"
 	fps := 26
+	fpsExplicitlySet := false
 	chunkSizeOverride := 0
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		if strings.HasPrefix(arg, "--") && strings.HasSuffix(arg, "m") && len(arg) > 3 {
-			// Minutes format: e.g. --100m, --15m
-			minStr := arg[2 : len(arg)-1]
+		if (strings.HasPrefix(arg, "--") || strings.HasPrefix(arg, "-")) && strings.HasSuffix(arg, "m") && len(arg) >= 3 && arg != "-1" {
+			// Minutes format: e.g. --100m, --1m, -1m, -10m
+			trim := strings.TrimLeft(arg, "-")
+			minStr := trim[:len(trim)-1]
 			mins, err := strconv.Atoi(minStr)
 			if err != nil {
-				return fmt.Errorf("invalid duration format '%s': expected --<N>m", arg)
+				return fmt.Errorf("invalid duration format '%s': expected --<N>m or -<N>m", arg)
 			}
 			duration = time.Duration(mins) * time.Minute
-		} else if arg == "--terminal" {
+		} else if arg == "-1" || arg == "--1" || arg == "--single" {
+			grid = "1x1"
+		} else if arg == "-4" || arg == "--4" {
+			grid = "2x2"
+		} else if arg == "-9" || arg == "--9" {
+			grid = "3x3"
+		} else if arg == "-12" || arg == "--12" {
+			grid = "4x3"
+		} else if arg == "--terminal" || arg == "-t" {
 			useTerminal = true
-		} else if arg == "--pin" && i+1 < len(args) {
+		} else if (arg == "--pin" || arg == "-p") && i+1 < len(args) {
 			pin = args[i+1]
 			i++
 		} else if arg == "--fps" && i+1 < len(args) {
 			f, err := strconv.Atoi(args[i+1])
 			if err == nil && f >= 5 && f <= 30 {
 				fps = f
+				fpsExplicitlySet = true
 			}
 			i++
-		} else if arg == "--grid" && i+1 < len(args) {
+		} else if (arg == "--grid" || arg == "-g") && i+1 < len(args) {
 			g := strings.ToLower(args[i+1])
 			if g == "1x1" || g == "2x2" || g == "3x3" || g == "4x3" {
 				grid = g
@@ -82,8 +93,16 @@ func RunSend(args []string) error {
 				chunkSizeOverride = cs
 			}
 			i++
-		} else if !strings.HasPrefix(arg, "--") && filePath == "" {
+		} else if !strings.HasPrefix(arg, "-") && filePath == "" {
 			filePath = arg
+		}
+	}
+
+	if !fpsExplicitlySet {
+		if grid == "1x1" {
+			fps = 16
+		} else {
+			fps = 26
 		}
 	}
 

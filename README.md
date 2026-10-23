@@ -54,7 +54,9 @@ Navigate to the directory containing your file and run:
 dove send presentation.pdf --100m
 ```
 
-- `--<N>m`: Optional session duration in minutes (e.g. `--100m`, `--15m`, `--5m`). If omitted, the session runs indefinitely until terminated with `Ctrl+C`.
+- `--<N>m`, `-<N>m`: Optional session duration in minutes (e.g. `--100m`, `--1m`, `-1m`).
+- `-1`: Stream single centered QR code instead of the default 3x3 multi-QR matrix (e.g. `dove send photo.png --1m -1`).
+- `-4`, `-9`, `-12`: Stream 2x2, 3x3, or 4x3 matrix grids.
 - `--pin <pin>`: Optional 4-6 digit passcode for custom key derivation.
 - `--terminal`: Streams animated QR frames directly to terminal stdout using ANSI half-block characters instead of opening a web browser.
 

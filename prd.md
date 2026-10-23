@@ -140,10 +140,14 @@ Each optical QR frame encapsulates an immutable binary header and fountain paylo
 
 #### `dove send <filepath> [flags]`
 - `<filepath>`: Path to target file.
-- `--<N>m`: Session duration in minutes (default: unlimited).
+- `--<N>m`, `-<N>m`: Session duration in minutes (default: unlimited).
+- `-1`, `--single`: Stream single centered QR code (1x1) instead of multi-QR grid.
+- `-4`: Stream 2x2 grid (4 concurrent QR codes).
+- `-9`: Stream 3x3 grid (9 concurrent QR codes, default).
+- `-12`: Stream 4x3 grid (12 concurrent QR codes, widescreen).
+- `--grid <1x1|2x2|3x3|4x3>`: Explicit display grid layout flag.
 - `--pin <4-6 digits>`: Optional custom encryption PIN.
-- `--grid <1x1|2x2|3x3|4x3>`: Display grid layout (default: `3x3` for browser; `1x1` for terminal).
-- `--fps <rate>`: Refresh frame rate (default: `26`, range: `8-30`).
+- `--fps <rate>`: Refresh frame rate (default: `26` for multi-grid, `16` for single QR, range: `8-30`).
 - `--chunk-size <bytes>`: Optional override for fountain symbol payload size (range: `128-600`).
 - `--terminal`: Stream animated QR directly to terminal stdout using ANSI half-block characters (`\u2580`, `\u2584`). Falls back to 1x1 unless terminal width > 160 columns.
 

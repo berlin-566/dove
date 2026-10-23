@@ -334,22 +334,27 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
         if (gridType === '4x3') {
           gridCols = 4;
           gridRows = 3;
+          canvas.width = 880;
+          canvas.height = 660;
         } else if (gridType === '2x2') {
           gridCols = 2;
           gridRows = 2;
+          canvas.width = 640;
+          canvas.height = 640;
         } else if (gridType === '1x1') {
           gridCols = 1;
           gridRows = 1;
+          canvas.width = 520;
+          canvas.height = 520;
         } else {
           gridCols = 3;
           gridRows = 3;
+          canvas.width = 720;
+          canvas.height = 720;
         }
         numCells = gridCols * gridRows;
 
-        canvas.width = gridCols * 240;
-        canvas.height = gridRows * 240;
-
-        document.getElementById('grid-display').innerText = `${gridType} (${numCells} QRs)`;
+        document.getElementById('grid-display').innerText = numCells === 1 ? 'Single (1 QR)' : `${gridType} (${numCells} QRs)`;
         document.getElementById('fps-display').innerText = `${fps} FPS (${fps * numCells} sym/s)`;
 
         if (info.remaining_seconds !== null) {
