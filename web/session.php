@@ -64,6 +64,8 @@ switch ($action) {
             'file_size' => $data['file_size'],
             'total_chunks' => $data['total_chunks'],
             'chunk_size' => $data['chunk_size'],
+            'grid' => $data['grid'] ?? '3x3',
+            'fps' => $data['fps'] ?? 26,
             'expires_at' => $data['expires_at'],
             'remaining_seconds' => $remainingSeconds,
             'total_frames' => count($data['frames'] ?? []),

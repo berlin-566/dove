@@ -123,6 +123,27 @@ class FountainDecoder(
         if (symbol.sessionId != sessionId) return false
 
         val rawIndices = pickIndices(symbol.seed, totalChunks)
+
+        // Fast path for systematic (degree-1) symbols: resolve directly in O(1)
+        if (rawIndices.size == 1) {
+            val chunkIdx = rawIndices[0]
+            if (!resolvedChunks.containsKey(chunkIdx)) {
+                val resolved = symbol.data.copyOf()
+                resolvedChunks[chunkIdx] = resolved
+                if (pendingSymbols.isNotEmpty()) {
+                    for (other in pendingSymbols) {
+                        if (other.indices.contains(chunkIdx)) {
+                            xorBytes(other.data, resolved)
+                            other.indices.remove(chunkIdx)
+                        }
+                    }
+                    peel()
+                }
+                return isComplete()
+            }
+            return isComplete()
+        }
+
         val entryData = symbol.data.copyOf()
         val unresolvedIndices = mutableSetOf<Int>()
 

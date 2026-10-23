@@ -68,6 +68,8 @@
     const scanCanvas = document.createElement('canvas');
     const scanCtx = scanCanvas.getContext('2d', { willReadFrequently: true });
 
+    const barcodeDetector = ('BarcodeDetector' in window) ? new BarcodeDetector({ formats: ['qr_code'] }) : null;
+
     let capturedSymbols = new Set();
     let isComplete = false;
 
@@ -91,18 +93,34 @@
       if (isComplete) return;
 
       if (video.readyState === video.HAVE_ENOUGH_DATA) {
-        scanCanvas.width = video.videoWidth;
-        scanCanvas.height = video.videoHeight;
-        scanCtx.drawImage(video, 0, 0, scanCanvas.width, scanCanvas.height);
+        if (barcodeDetector) {
+          barcodeDetector.detect(video).then(barcodes => {
+            for (const barcode of barcodes) {
+              if (barcode.rawValue) {
+                handleCapturedFrame(barcode.rawValue);
+              }
+            }
+          }).catch(() => {});
+        } else {
+          scanCanvas.width = video.videoWidth;
+          scanCanvas.height = video.videoHeight;
+          scanCtx.drawImage(video, 0, 0, scanCanvas.width, scanCanvas.height);
 
-        const imageData = scanCtx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
-        if (typeof jsQR !== 'undefined') {
-          const code = jsQR(imageData.data, imageData.width, imageData.height, {
-            inversionAttempts: 'dontInvert'
-          });
+          const imageData = scanCtx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
+          if (typeof jsQR !== 'undefined') {
+            const halfH = Math.floor(scanCanvas.height / 2);
+            const topImg = scanCtx.getImageData(0, 0, scanCanvas.width, halfH);
+            const topCode = jsQR(topImg.data, topImg.width, topImg.height);
+            if (topCode && topCode.data) handleCapturedFrame(topCode.data);
 
-          if (code && code.data) {
-            handleCapturedFrame(code.data);
+            const botImg = scanCtx.getImageData(0, halfH, scanCanvas.width, halfH);
+            const botCode = jsQR(botImg.data, botImg.width, botImg.height);
+            if (botCode && botCode.data) handleCapturedFrame(botCode.data);
+
+            const code = jsQR(imageData.data, imageData.width, imageData.height);
+            if (code && code.data) {
+              handleCapturedFrame(code.data);
+            }
           }
         }
       }

@@ -115,22 +115,25 @@ header {
 }
 
 .qr-viewport {
-  background-color: #ffffff;
+  background-color: #010409;
+  border: 1px solid var(--border-default);
   border-radius: 8px;
-  padding: 20px;
+  padding: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
   margin: 16px auto;
-  width: 440px;
-  height: 440px;
+  max-width: 720px;
+  width: 100%;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
 }
 
 .qr-canvas {
-  width: 400px;
-  height: 400px;
+  width: 100%;
+  max-width: 680px;
+  height: auto;
   image-rendering: pixelated;
+  border-radius: 4px;
 }
 
 .camera-viewport {

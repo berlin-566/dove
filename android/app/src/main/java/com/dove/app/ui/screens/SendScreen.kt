@@ -1,6 +1,7 @@
 package com.dove.app.ui.screens
 
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color as AndroidColor
 import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -21,8 +22,11 @@ import androidx.compose.ui.unit.sp
 import com.dove.app.crypto.Crypto
 import com.dove.app.fountain.Symbol
 import com.dove.app.fountain.pickIndices
+import com.dove.app.settings.SettingsManager
 import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import kotlinx.coroutines.delay
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -36,6 +40,8 @@ fun SendScreen() {
     var isStreaming by remember { mutableStateOf(false) }
     var currentFrameIndex by remember { mutableStateOf(0) }
     var currentBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    val transmissionFps = remember { SettingsManager.getTransmissionFps(context) }
+    val gridLayout = remember { SettingsManager.getGridLayout(context) }
 
     val filePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -78,7 +84,12 @@ fun SendScreen() {
                 .array()
 
             val sessionId = SecureRandom().nextLong()
-            val chunkSize = 128
+            val chunkSize = when {
+                fullPayload.size >= 800000 -> 380
+                fullPayload.size >= 200000 -> 320
+                fullPayload.size >= 50000 -> 256
+                else -> 128
+            }
             val totalChunks = (fullPayload.size + chunkSize - 1) / chunkSize
 
             // Slice fullPayload into fixed-size chunks
@@ -92,36 +103,37 @@ fun SendScreen() {
 
             var seed = 1L
             val writer = QRCodeWriter()
+            val hints = mapOf(
+                EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.L,
+                EncodeHintType.MARGIN to 1
+            )
+            val isDual = gridLayout == "1x2"
+            val delayMs = (1000f / transmissionFps).toLong().coerceAtLeast(16L)
 
             while (isStreaming) {
-                val indices = pickIndices(seed, totalChunks)
-                val combined = ByteArray(chunkSize)
-                for (idx in indices) {
-                    val src = chunks[idx]
-                    for (b in 0 until chunkSize) {
-                        combined[b] = (combined[b].toInt() xor src[b].toInt()).toByte()
-                    }
-                }
-
-                val symbol = Symbol(sessionId, totalChunks, chunkSize, seed++, combined)
-                val raw = Base64.encodeToString(symbol.serialize(), Base64.NO_WRAP)
-
                 try {
-                    val bitMatrix = writer.encode(raw, BarcodeFormat.QR_CODE, 512, 512)
-                    val width = bitMatrix.width
-                    val height = bitMatrix.height
-                    val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565)
-                    for (x in 0 until width) {
-                        for (y in 0 until height) {
-                            bmp.setPixel(x, y, if (bitMatrix.get(x, y)) AndroidColor.BLACK else AndroidColor.WHITE)
-                        }
+                    if (isDual) {
+                        // 1x2 Dual Stack Mode
+                        val bmp1 = generateQrBitmap(writer, sessionId, totalChunks, chunkSize, seed++, chunks, hints, 400, 400)
+                        val bmp2 = generateQrBitmap(writer, sessionId, totalChunks, chunkSize, seed++, chunks, hints, 400, 400)
+
+                        val combinedBmp = Bitmap.createBitmap(400, 816, Bitmap.Config.RGB_565)
+                        val canvas = Canvas(combinedBmp)
+                        canvas.drawColor(AndroidColor.BLACK)
+                        canvas.drawBitmap(bmp1, 0f, 0f, null)
+                        canvas.drawBitmap(bmp2, 0f, 416f, null)
+                        currentBitmap = combinedBmp
+                        currentFrameIndex += 2
+                    } else {
+                        // 1x1 Standard Mode
+                        val bmp = generateQrBitmap(writer, sessionId, totalChunks, chunkSize, seed++, chunks, hints, 512, 512)
+                        currentBitmap = bmp
+                        currentFrameIndex++
                     }
-                    currentBitmap = bmp
-                    currentFrameIndex++
                 } catch (_: Exception) {
-                    // Skip frame on draw failure
+                    // Skip on render failure
                 }
-                delay(70) // ~14 FPS
+                delay(delayMs)
             }
         }
     }
@@ -149,6 +161,12 @@ fun SendScreen() {
                     text = if (selectedFileName != null) "File: $selectedFileName (${selectedFileBytes?.size ?: 0} bytes)" else "No file selected",
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Layout: $gridLayout | Speed: ${transmissionFps.toInt()} FPS",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.secondary
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -179,9 +197,9 @@ fun SendScreen() {
         if (isStreaming && currentBitmap != null) {
             Box(
                 modifier = Modifier
-                    .size(320.dp)
+                    .size(if (gridLayout == "1x2") 380.dp else 320.dp)
                     .background(androidx.compose.ui.graphics.Color.White, RoundedCornerShape(8.dp))
-                    .padding(16.dp),
+                    .padding(8.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Image(
@@ -192,10 +210,42 @@ fun SendScreen() {
             }
             Spacer(modifier = Modifier.height(12.dp))
             Text(
-                text = "Frame: $currentFrameIndex (14 FPS)",
+                text = "Symbols Broadcast: $currentFrameIndex (${transmissionFps.toInt()} FPS)",
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
+}
+
+private fun generateQrBitmap(
+    writer: QRCodeWriter,
+    sessionId: Long,
+    totalChunks: Int,
+    chunkSize: Int,
+    seed: Long,
+    chunks: Array<ByteArray>,
+    hints: Map<EncodeHintType, Any>,
+    width: Int,
+    height: Int
+): Bitmap {
+    val indices = pickIndices(seed, totalChunks)
+    val combined = ByteArray(chunkSize)
+    for (idx in indices) {
+        val src = chunks[idx]
+        for (b in 0 until chunkSize) {
+            combined[b] = (combined[b].toInt() xor src[b].toInt()).toByte()
+        }
+    }
+
+    val symbol = Symbol(sessionId, totalChunks, chunkSize, seed, combined)
+    val raw = Base64.encodeToString(symbol.serialize(), Base64.NO_WRAP)
+    val bitMatrix = writer.encode(raw, BarcodeFormat.QR_CODE, width, height, hints)
+    val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565)
+    for (x in 0 until width) {
+        for (y in 0 until height) {
+            bmp.setPixel(x, y, if (bitMatrix.get(x, y)) AndroidColor.BLACK else AndroidColor.WHITE)
+        }
+    }
+    return bmp
 }

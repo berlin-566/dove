@@ -265,12 +265,13 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
       <div class="meta-row">
         <div class="meta-item">Session ID: <strong id="session-display">-</strong></div>
         <div class="meta-item">Fountain Slices: <strong id="chunk-display">-</strong></div>
+        <div class="meta-item">Grid: <strong id="grid-display">3x3 (9 QRs)</strong></div>
         <div class="meta-item">Frame: <strong id="frame-counter">0 / 0</strong></div>
-        <div class="meta-item">Rate: <strong id="fps-display">14 FPS</strong></div>
+        <div class="meta-item">Rate: <strong id="fps-display">26 FPS</strong></div>
       </div>
 
       <div class="qr-viewport" id="viewport">
-        <canvas id="qr-canvas" class="qr-canvas" width="400" height="400"></canvas>
+        <canvas id="qr-canvas" class="qr-canvas" width="720" height="720"></canvas>
       </div>
 
       <div class="controls-bar">
@@ -299,7 +300,10 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
     let frames = [];
     let currentFrameIndex = 0;
     let isPlaying = true;
-    let fps = 14;
+    let fps = 26;
+    let gridCols = 3;
+    let gridRows = 3;
+    let numCells = 9;
     let intervalId = null;
     let remainingSeconds = null;
 
@@ -322,6 +326,32 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
         document.getElementById('file-size').innerText = `${info.file_size.toLocaleString()} bytes`;
         document.getElementById('chunk-display').innerText = `${info.total_chunks} chunks`;
 
+        if (info.fps) {
+          fps = info.fps;
+        }
+
+        const gridType = info.grid || '3x3';
+        if (gridType === '4x3') {
+          gridCols = 4;
+          gridRows = 3;
+        } else if (gridType === '2x2') {
+          gridCols = 2;
+          gridRows = 2;
+        } else if (gridType === '1x1') {
+          gridCols = 1;
+          gridRows = 1;
+        } else {
+          gridCols = 3;
+          gridRows = 3;
+        }
+        numCells = gridCols * gridRows;
+
+        canvas.width = gridCols * 240;
+        canvas.height = gridRows * 240;
+
+        document.getElementById('grid-display').innerText = `${gridType} (${numCells} QRs)`;
+        document.getElementById('fps-display').innerText = `${fps} FPS (${fps * numCells} sym/s)`;
+
         if (info.remaining_seconds !== null) {
           remainingSeconds = info.remaining_seconds;
           updateTimerDisplay();
@@ -343,41 +373,67 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
       }
     }
 
-    function renderFrame(rawText) {
-      if (typeof qrcode === 'undefined') {
-        return;
-      }
+    function renderMatrix(symbols, cols, rows) {
+      if (typeof qrcode === 'undefined') return;
 
+      const cellW = Math.floor(canvas.width / cols);
+      const cellH = Math.floor(canvas.height / rows);
+
+      ctx.fillStyle = '#010409';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      for (let i = 0; i < symbols.length; i++) {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const x = col * cellW;
+        const y = row * cellH;
+        renderSingleQr(symbols[i], x, y, cellW, cellH);
+      }
+    }
+
+    function renderSingleQr(rawText, startX, startY, width, height) {
       let qr;
       try {
-        qr = qrcode(0, 'M');
+        qr = qrcode(0, 'L');
         qr.addData(rawText, 'Byte');
         qr.make();
       } catch (e1) {
         try {
-          qr = qrcode(0, 'L');
+          qr = qrcode(0, 'M');
           qr.addData(rawText, 'Byte');
           qr.make();
         } catch (e2) {
-          console.error('QR encoding failure:', e2);
           return;
         }
       }
 
       const moduleCount = qr.getModuleCount();
-      const quietZone = 4;
+      const padding = 6;
+      const drawW = width - (padding * 2);
+      const drawH = height - (padding * 2);
+      const size = Math.min(drawW, drawH);
+      const quietZone = 2;
       const totalModules = moduleCount + (quietZone * 2);
-      const cellSize = Math.floor(canvas.width / totalModules);
-      const offset = Math.floor((canvas.width - (totalModules * cellSize)) / 2) + (quietZone * cellSize);
+      const cellSize = Math.floor(size / totalModules);
+      const qrPixelSize = totalModules * cellSize;
+      const offsetX = startX + Math.floor((width - qrPixelSize) / 2) + (quietZone * cellSize);
+      const offsetY = startY + Math.floor((height - qrPixelSize) / 2) + (quietZone * cellSize);
 
+      // White quiet zone tile
       ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(
+        startX + Math.floor((width - qrPixelSize) / 2),
+        startY + Math.floor((height - qrPixelSize) / 2),
+        qrPixelSize,
+        qrPixelSize
+      );
 
+      // Black QR modules
       ctx.fillStyle = '#000000';
-      for (let row = 0; row < moduleCount; row++) {
-        for (let col = 0; col < moduleCount; col++) {
-          if (qr.isDark(row, col)) {
-            ctx.fillRect(offset + (col * cellSize), offset + (row * cellSize), cellSize, cellSize);
+      for (let r = 0; r < moduleCount; r++) {
+        for (let c = 0; c < moduleCount; c++) {
+          if (qr.isDark(r, c)) {
+            ctx.fillRect(offsetX + (c * cellSize), offsetY + (r * cellSize), cellSize, cellSize);
           }
         }
       }
@@ -386,11 +442,14 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
     function stepStream() {
       if (!isPlaying || frames.length === 0) return;
 
-      const framePayload = frames[currentFrameIndex % frames.length];
-      currentFrameIndex++;
+      const currentSymbols = [];
+      for (let i = 0; i < numCells; i++) {
+        currentSymbols.push(frames[(currentFrameIndex + i) % frames.length]);
+      }
+      currentFrameIndex = (currentFrameIndex + numCells) % frames.length;
       document.getElementById('frame-counter').innerText = `${currentFrameIndex} / ${frames.length}`;
 
-      renderFrame(framePayload);
+      renderMatrix(currentSymbols, gridCols, gridRows);
     }
 
     function startStreaming() {

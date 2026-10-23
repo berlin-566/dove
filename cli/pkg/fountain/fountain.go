@@ -35,10 +35,25 @@ type Encoder struct {
 	CurrentSeed uint32
 }
 
+// CalculateOptimalChunkSize determines the optimal symbol chunk size based on payload size
+// to maximize optical scanning speed and reliability.
+func CalculateOptimalChunkSize(payloadLen int) int {
+	if payloadLen >= 800000 {
+		return 380 // Fits QR Version 12 (65x65) with Level L error correction
+	}
+	if payloadLen >= 200000 {
+		return 320
+	}
+	if payloadLen >= 50000 {
+		return 256
+	}
+	return 128
+}
+
 // NewEncoder slices source data into K chunks of fixed chunkSize.
 func NewEncoder(sessionID uint64, data []byte, chunkSize int) *Encoder {
 	if chunkSize <= 0 {
-		chunkSize = 350
+		chunkSize = CalculateOptimalChunkSize(len(data))
 	}
 
 	dataLen := len(data)
@@ -181,6 +196,29 @@ func (d *Decoder) AddSymbol(sym *Symbol) bool {
 	}
 
 	rawIndices := pickIndices(sym.Seed, d.TotalChunks)
+
+	// Fast path for systematic (degree-1) symbols: resolve directly in O(1)
+	if len(rawIndices) == 1 {
+		chunkIdx := rawIndices[0]
+		if _, ok := d.ResolvedChunks[chunkIdx]; !ok {
+			resolvedData := make([]byte, len(sym.Data))
+			copy(resolvedData, sym.Data)
+			d.ResolvedChunks[chunkIdx] = resolvedData
+			d.ResolvedCount++
+
+			if len(d.PendingSymbols) > 0 {
+				for _, other := range d.PendingSymbols {
+					if other.Indices[chunkIdx] {
+						xorBytes(other.Data, resolvedData)
+						delete(other.Indices, chunkIdx)
+					}
+				}
+				d.peel()
+			}
+			return d.IsComplete()
+		}
+		return d.IsComplete()
+	}
 
 	entry := &SymbolEntry{
 		Indices: make(map[int]bool),

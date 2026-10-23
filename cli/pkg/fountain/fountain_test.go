@@ -44,3 +44,37 @@ func TestFountainEncodeDecode(t *testing.T) {
 		t.Fatalf("reconstructed data does not match original data")
 	}
 }
+
+func TestFountainLarge1MB(t *testing.T) {
+	sessionID := uint64(123456789)
+	oneMB := 1000000
+	originalData := make([]byte, oneMB)
+	for i := 0; i < oneMB; i++ {
+		originalData[i] = byte(i % 251)
+	}
+
+	chunkSize := CalculateOptimalChunkSize(oneMB)
+	if chunkSize != 380 {
+		t.Fatalf("expected chunkSize 380 for 1MB payload, got %d", chunkSize)
+	}
+
+	encoder := NewEncoder(sessionID, originalData, chunkSize)
+	decoder := NewDecoder(sessionID, int(encoder.TotalChunks), int(encoder.ChunkSize))
+
+	// Simulate systematic phase delivery
+	for i := 0; i < int(encoder.TotalChunks); i++ {
+		sym := encoder.NextSymbol()
+		if decoder.AddSymbol(sym) {
+			break
+		}
+	}
+
+	if !decoder.IsComplete() {
+		t.Fatalf("expected complete reconstruction after systematic symbols: %d / %d", decoder.ResolvedCount, decoder.TotalChunks)
+	}
+
+	reconstructed := decoder.Reconstruct(oneMB)
+	if !bytes.Equal(reconstructed, originalData) {
+		t.Fatalf("1MB reconstructed payload does not match original")
+	}
+}

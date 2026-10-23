@@ -67,4 +67,7 @@ dependencies {
 
     // Pure Java QR Code engine (100% air-gapped, zero C++ native .so, zero page alignment issues)
     implementation("com.google.zxing:core:3.5.3")
+
+    // Google ML Kit Offline Barcode Scanning (bundled in-app model, 100% air-gapped, detects 1 to 12 QRs concurrently)
+    implementation("com.google.mlkit:barcode-scanning:17.3.0")
 }

@@ -2,7 +2,7 @@
 
 **Project Name:** Dove  
 **Type:** Air-Gapped Optical File Sharing System (CLI, PHP Session Engine, Android App)  
-**Status:** Approved Specification  
+**Status:** Approved Specification (v2.1: Turbo Multi-Matrix & Flexible Optical Vision)  
 **Architecture:** Monorepo (`/cli`, `/web`, `/android`, `/docs`)
 
 ---
@@ -17,7 +17,22 @@ Dove operates under zero-trust, zero-radio assumptions:
 - **No Bluetooth or local hotspot pairing required.**
 - **Zero RF emission or radio sniffing vulnerability.**
 
-Data is sliced, compressed, encrypted, and streamed optically as high-frequency animated QR codes on screen, captured and reconstructed by optical camera sensors (webcam on desktop, CameraX on mobile). Using **rateless fountain erasure codes (Luby Transform / UR-style)**, a single desktop screen can broadcast a file simultaneously to **100+ Android phones** without requiring any synchronization or two-way radio handshakes.
+Data is sliced, compressed, encrypted, and streamed optically as high-frequency animated QR codes on screen, captured and reconstructed by optical camera sensors (webcam on desktop, CameraX on mobile).
+
+### 1.1 Ultra-Fast Turbo Matrix & Flexible Optical Vision (v2.1)
+To achieve optical file transfer of 1 MB files (photos, documents, archives) in **approximately 10 seconds** (~100 KB/s throughput):
+- **Spatial Matrix Transmitter:** Desktop emits a synchronized matrix of QR codes (default: `3x3` = 9 concurrent emitters; widescreen: `4x3` = 12 emitters).
+- **Unified Fountain Pool:** All matrix emitters emit distinct Luby Transform (LT) symbols from the same unified fountain encoder. Every symbol captured advances the global linear decoding matrix without head-of-line blocking or quadrant-specific lock-in.
+- **Flexible Scanning Modes (Multi-QR or 1-by-1):**
+  - **Wide View Mode:** Users can point the camera at the entire screen (~50 cm distance) to capture all 9 to 12 QR codes simultaneously for maximum ~100 KB/s throughput.
+  - **1-by-1 Sequential Scanning Mode:** Users can hold the camera close to scan individual QR codes or pan across the display one by one. Each symbol captured from any visible QR code continues advancing the same global reconstruction counter.
+- **Real-Time Telemetry & Counting HUD:** Complete on-screen telemetry showing:
+  - Exact symbol count captured.
+  - Chunks resolved vs total required chunks: `Resolved: X / K (Percentage%)`.
+  - Codes In View counter: dynamically displays the number of QR codes actively detected in the current camera frame (e.g. `Codes in view: 9` or `1`).
+  - Real-time optical speedometer in `KB/s` and `symbols/sec`.
+  - Dynamic green bounding reticles (`#238636`) overlaid on every detected QR code.
+- **Persistent Optical Tuning Engine:** Complete settings persistence (`SettingsManager` backed by `SharedPreferences`) allowing instant tuning of transmission FPS (8-30 FPS), camera analysis resolution (1080p vs 720p), and visual theme.
 
 ---
 
@@ -25,41 +40,48 @@ Data is sliced, compressed, encrypted, and streamed optically as high-frequency 
 
 ```mermaid
 flowchart TD
-    subgraph PC_To_Phone["PC -> Phone (Broadcast to 1-100 Phones)"]
-        A["CLI: dove send file.txt --100m"] --> B["Go: zstd Compress + AES-256-GCM Encrypt"]
-        B --> C["Go: Rateless Fountain Encoder (LT)"]
+    subgraph PC_To_Phone["PC -> Phone (Turbo Matrix Optical Stream)"]
+        A["CLI: dove send photo.jpg --grid 3x3 --fps 26"] --> B["Go: zstd Compress + AES-256-GCM Encrypt"]
+        B --> C["Go: Rateless Fountain Encoder (380B Dynamic Chunks, K ≈ 2,632)"]
         C --> D["PHP: session.php spins up local web server"]
-        D --> E["Browser Tab: High-FPS Animated QR Stream Player"]
-        E --> F["1 to 100 Android Phones scan screen via CameraX"]
-        F --> G["Android: Fountain Decoder reconstructs + decrypts file"]
+        D --> E["Browser Tab: 3x3 Synchronous Matrix Canvas @ 26 FPS"]
+        E --> F{"Android Scanning Mode"}
+        F -->|Wide Distance| G["Scan all 9 QRs simultaneously (~10s transfer)"]
+        F -->|Close-up / Pan| H["Scan 1-by-1 or subsets (seamless incremental progress)"]
+        G --> I["Android: ML Kit Offline Multi-Barcode Detector"]
+        H --> I
+        I --> J["Android: Telemetry HUD displays codes in view, speed, progress"]
+        J --> K["Android: Unified Fountain Decoder resolves symbols + auto-decrypts"]
     end
 
-    subgraph Phone_To_PC["Phone -> PC (Camera Scan)"]
-        H["CLI: dove get"] --> I["Go + PHP: Launch browser tab with Webcam Scanner"]
-        J["Android App: Tab 'Send' picks file"] --> K["Android: Encrypts + displays Animated QR on phone screen"]
-        K --> L["PC Webcam scans phone screen"]
-        L --> M["PHP/Go: Reconstructs payload, decrypts, and saves to disk"]
+    subgraph Phone_To_PC["Phone -> PC (Adaptive Single / Dual Stream)"]
+        L["CLI: dove get"] --> M["Go + PHP: Browser tab with Multi-Barcode Webcam Scanner"]
+        N["Android App: Tab 'Send' picks file (1x1 or 1x2 mode)"] --> O["Android: Encrypts + streams animated QR(s) at configured FPS"]
+        O --> P["PC Webcam scans phone screen"]
+        P --> Q["Browser: Native BarcodeDetector / Split jsQR decodes stream"]
+        Q --> R["PHP/Go: Reconstructs payload, decrypts, and saves to disk"]
     end
 ```
 
 ### 2.1 PC to Phone (`dove send`)
-1. User navigates to a directory in their terminal and runs:
-   ```bash
-   dove send presentation.pdf --100m
-   ```
-2. The Go CLI reads the file, compresses it via `zstd`, encrypts it using `AES-256-GCM`, generates an ephemeral session key (included in the stream header) or optional `--pin`, and feeds chunks into a rateless Fountain Encoder.
-3. The Go CLI spawns PHP's built-in web server (`php -S 127.0.0.1:<port>`) serving `web/session.php`.
-4. The system opens the default desktop browser tab displaying a clean, high-FPS animated QR code canvas player.
-5. Up to 100 people point their Dove Android app camera at the screen. The rateless fountain decoder captures frames asynchronously and reconstructs the file locally on each phone.
-6. When the time expires (e.g. 100 minutes) or when the user halts the process (`Ctrl+C`), `session.php` wipes temporary memory/buffers, terminates the local server, and closes cleanly.
+1. User runs `dove send photo.jpg --grid 3x3 --fps 26` in terminal.
+2. The Go CLI reads the file, compresses via `zstd`, encrypts using `AES-256-GCM`, dynamically tunes chunk sizes (380 bytes for 1 MB payloads), and generates an infinite rateless fountain stream.
+3. The Go CLI spawns PHP built-in web server (`php -S 127.0.0.1:<port>`) serving `web/session.php`.
+4. The system opens the desktop browser displaying a 3x3 matrix of synchronized QR codes with quiet zones.
+5. Android user points Dove app camera at the monitor:
+   - Standing ~50 cm back captures all 9 QR codes per frame (~100 KB/s throughput, ~10s for 1 MB).
+   - Moving closer or panning scans individual QR codes one by one without errors or stalling.
+6. Real-time telemetry HUD displays active bounding reticles around detected QRs, symbols received, chunks resolved, codes in view, and current KB/s.
+7. Symbols feed into a single unified `FountainDecoder`. Once sufficient symbols are captured ($K \times 1.05$), the file automatically decrypts and saves into Android `Downloads/`.
+8. Once finished or canceled (`Ctrl+C`), temporary session buffers are wiped.
 
 ### 2.2 Phone to PC (`dove get`)
-1. User runs `dove get` in their terminal.
-2. The Go CLI launches the local PHP service and opens a browser tab with a centered webcam viewport.
-3. On the Dove Android app, user navigates to the **Send** tab, selects a file, and clicks **Stream**.
-4. The phone screen loops the high-FPS encrypted animated QR stream.
-5. The desktop user holds the phone screen up to the computer webcam.
-6. The web scanner reads the fountain frames, passes them to the backend, reconstructs the original file, verifies the integrity checksum, decrypts the payload, and saves the file directly into the current terminal working directory.
+1. User runs `dove get` in terminal.
+2. The Go CLI launches the local PHP service and opens a browser tab with a webcam scanner.
+3. In the Dove Android app, user selects file in **Send** tab and chooses layout:
+   - **1x1 Standard:** Single large centered QR code (optimal for lower-resolution 720p webcams).
+   - **1x2 Stacked:** Two vertically stacked QR codes (doubles speed for modern 1080p webcams).
+4. Desktop browser decodes incoming frames using the native `BarcodeDetector` API (with split-region `jsQR` fallback), reassembles the fountain symbols, and downloads the file to the current terminal directory.
 
 ---
 
@@ -67,9 +89,11 @@ flowchart TD
 
 | Component | Technology | Primary Responsibilities |
 | :--- | :--- | :--- |
-| **CLI Engine** | Go (Golang 1.22+) | Single self-contained binary. File I/O, `zstd` compression, `AES-256-GCM` encryption, rateless Luby Transform fountain code generation/reconstruction, process supervisor for PHP. |
-| **Session & Web Service** | PHP 8.2+ (`web/session.php`) | Clean, standard, non-bloated procedural/OOP PHP. Spun up via `php -S 127.0.0.1:<port>`. Manages session countdown/TTL, automatic session destruction, file import/staging metadata, and serves the high-performance HTML5/Canvas animated QR stream and webcam scanner. |
-| **Mobile App** | Android (Kotlin + Jetpack Compose) | Native Android APK. CameraX for high-framerate optical decoding, Jetpack Compose UI modeled after the official GitHub Android app (matte black dark mode `#010409`, clean light mode `#FFFFFF`, standard SVG vector icons, zero emojis). |
+| **CLI Engine** | Go (Golang 1.22+) | Static standalone binary. File I/O, `zstd` compression, `AES-256-GCM`, dynamic chunk scaling (128-480 bytes), infinite rateless Luby Transform fountain code generation, multi-stream matrix coordinator, and PHP supervisor. |
+| **Session & Web Service** | PHP 8.2+ (`web/session.php`) | Procedural/modular lightweight PHP. Spun up via `php -S 127.0.0.1:<port>`. Manages session countdown/TTL, automatic buffer deletion, serves the 3x3/4x3 canvas multi-QR player, and hosts the multi-barcode webcam scanner. |
+| **Mobile App** | Android (Kotlin + Jetpack Compose) | Native Android APK. CameraX + Bundled Offline Google ML Kit Barcode Scanning (`com.google.mlkit:barcode-scanning`) for 30+ FPS multi-QR capture. Live telemetry HUD with bounding boxes and speedometer. 100% air-gapped. Zero emojis. |
+| **Settings & Optical Tuning** | Android SharedPreferences | Persistent store for transmission FPS (8-30 FPS), CameraX preview resolution (1080p vs 720p), and visual appearance theme. |
+| **Webcam Vision (Desktop)** | Web BarcodeDetector API + Fallback | Hardware-accelerated multi-barcode decoding in Chromium browsers; dual-region `jsQR` fallback for non-Chromium environments. |
 
 ---
 
@@ -80,29 +104,33 @@ flowchart TD
 [Raw File] 
    ──> [zstd Compression] 
    ──> [AES-256-GCM Encryption] 
-   ──> [Split into K Slices (300-500 bytes each)] 
+   ──> [Dynamic Chunk Partitioning (380B for 1 MB payloads)] 
    ──> [Luby Transform (LT) Rateless Fountain Symbols] 
-   ──> [Frame Packaging] 
-   ──> [Animated QR Stream @ 12-20 FPS]
+   ──> [Matrix Cell Dispatch: Cell 0 .. Cell N-1] 
+   ──> [Synchronous 3x3 / 4x3 Canvas Matrix @ 26 FPS]
 ```
 
-### 4.2 Frame Binary Schema
+### 4.2 Dynamic Chunk Sizing Table
+To balance optical scan reliability with frame count reduction:
+- Payload < 50 KB: 128 bytes/chunk
+- Payload 50 KB - 200 KB: 256 bytes/chunk
+- Payload 200 KB - 800 KB: 320 bytes/chunk (QR v11)
+- Payload >= 800 KB: 380 bytes/chunk (QR v12, Level L)
+
+### 4.3 Frame Binary Schema
 Each optical QR frame encapsulates an immutable binary header and fountain payload:
 
 ```
 +---------------+----------------+----------------+----------------+---------------------+----------------+
 | Magic (2B)    | Version (1B)   | Session ID (8B)| Seq / Seed (4B)| Degree (2B)         | Payload (N B)  |
-| 0x44 0x56     | 0x01           | Ephemeral UUID | PRNG Seed      | Chunk indices XOR'd | Encrypted Data |
+| 0x44 0x56     | 0x02           | Ephemeral UUID | PRNG Seed      | Chunk indices XOR'd | Encrypted Data |
 +---------------+----------------+----------------+----------------+---------------------+----------------+
 | Checksum (4B) |
 | CRC32-IEEE    |
 +---------------+
 ```
 
-- **Magic Bytes:** `0x44 0x56` (`"DV"` in ASCII).
-- **Session ID:** 64-bit ephemeral identifier tying frames to a single session.
-- **Rateless Seed & Degree:** Uses a Robust Soliton Distribution to pick chunk combinations. A receiver requires only $K \times (1 + \epsilon)$ frames (typically $\approx 1.05 \times K$) to reconstruct the file completely, regardless of which individual frames were missed.
-- **Optical Tuning:** Payload per frame is constrained to 300–450 bytes (QR Version 10–14, Error Correction Level `L` or `M`) to guarantee sharp contrast, fast scanning across camera distances, and resistance to screen motion blur.
+- **Unified Fountain Peeling:** All cells feed into the exact same Gaussian elimination / belief propagation solver. Each captured symbol carries its own PRNG seed and degree, making every capture mathematically additive regardless of whether codes are scanned all at once or one by one.
 
 ---
 
@@ -111,99 +139,85 @@ Each optical QR frame encapsulates an immutable binary header and fountain paylo
 ### 5.1 Commands & Flags
 
 #### `dove send <filepath> [flags]`
-- `<filepath>`: Path to the target file.
-- `--<N>m`: Session duration in minutes (e.g. `--100m`, `--15m`, `--5m`). If omitted, session defaults to unlimited (runs until `Ctrl+C`).
-- `--pin <4-6 digits>`: Optional custom encryption PIN. If omitted, an ephemeral 256-bit key is embedded seamlessly into the optical stream header.
-- `--terminal`: Stream animated QR directly to terminal stdout using ANSI half-block characters (`\u2580`, `\u2584`), bypassing browser launch.
-- `--fps <rate>`: Frame rate for animation (default: `14`, range: `5-30`).
+- `<filepath>`: Path to target file.
+- `--<N>m`: Session duration in minutes (default: unlimited).
+- `--pin <4-6 digits>`: Optional custom encryption PIN.
+- `--grid <1x1|2x2|3x3|4x3>`: Display grid layout (default: `3x3` for browser; `1x1` for terminal).
+- `--fps <rate>`: Refresh frame rate (default: `26`, range: `8-30`).
+- `--chunk-size <bytes>`: Optional override for fountain symbol payload size (range: `128-600`).
+- `--terminal`: Stream animated QR directly to terminal stdout using ANSI half-block characters (`\u2580`, `\u2584`). Falls back to 1x1 unless terminal width > 160 columns.
 
 #### `dove get [flags]`
-- `--output <dir>`: Destination folder for received files (default: current directory `.`).
-- `--terminal`: Use terminal camera capture if supported (default launches clean browser webcam interface).
+- `--output <dir>`: Destination folder for received files (default: `.`).
+- `--terminal`: Terminal camera capture if supported.
 
 ---
 
-## 6. PHP Session Engine Specification (`session.php`)
+## 6. Web Companion Engine (`/web`)
 
-### 6.1 Architectural Rules
-- Standard, lightweight PHP (clean procedural or modular OOP; no heavy frameworks like Symfony or Laravel).
-- Executed via PHP's built-in CLI web server: `php -S 127.0.0.1:<port> -t ./web`.
-- Handles session lifecycle states:
-  - `INIT`: Generates ephemeral session tokens and registers countdown timer.
-  - `STREAM`: Delivers chunk arrays or fountain seeds to the browser canvas renderer.
-  - `IMPORT`: Receives captured frames from webcam interface for `dove get` and validates file assembly.
-  - `DESTROY`: Triggers automatic cleanup when countdown expires, deleting temporary staged buffers and issuing graceful server shutdown.
+### 6.1 Multi-QR Player (`player.html`)
+- Displays a synchronized 3x3, 4x3, or 2x2 canvas matrix styled in GitHub dark mode (`#010409`).
+- Uses QR Error Correction Level `L` (7%) for maximum payload density.
+- Atomic double-buffered redraw on `requestAnimationFrame` ensures all matrix cells flip simultaneously without partial frame tear.
+- Real-time session timer countdown, payload statistics, and active FPS monitor.
+
+### 6.2 Webcam Scanner (`scanner.html`)
+- Uses `window.BarcodeDetector` to decode multiple barcodes per video frame concurrently.
+- If `BarcodeDetector` is unsupported (e.g. Firefox), the canvas analyzer partitions the frame into dual vertical regions and executes split-instance `jsQR` decoding.
+- Progress bar displays real-time fountain symbol reception and degree elimination status.
 
 ---
 
 ## 7. Android Application Specification
 
-### 7.1 UX / UI Design Principles
-- **Aesthetic Benchmark:** Modeled after the official **GitHub Android Application**.
-- **Dark Theme:** Matte Black (`#010409` canvas, `#0D1117` surface cards, `#30363D` borders, `#C9D1D9` primary text).
-- **Light Theme:** High-contrast neutral (`#FFFFFF` background, `#F6F8FA` surfaces, `#D0D7DE` borders).
-- **Iconography:** Strictly standard SVG vector drawables (Material / Octicons vector paths).
-- **NO EMOJIS:** Absolute prohibition of emojis in UI strings, button labels, toasts, logs, and code comments.
-- **Typography:** System default monospace / sans-serif with strict typographic hierarchy.
+### 7.1 Visual & UX Principles
+- Modeled after the official **GitHub Android Application**.
+- Dark Mode: `#010409` canvas, `#0D1117` cards, `#30363D` borders, `#C9D1D9` text.
+- Standard SVG vector icons.
+- **Zero Emojis:** Strictly prohibited in all UI elements, strings, logs, and comments.
 
-### 7.2 Tab Architecture (3-Tab Navigation)
+### 7.2 Tab Architecture
 1. **Send Tab:**
-   - Native document picker button.
-   - File details card (name, size, mime type, estimated frames).
-   - High-contrast animated QR player with FPS throttle and display brightness boost button.
-2. **Receive Tab:**
-   - Full-screen CameraX optical scanner viewport with minimalist corner reticle.
-   - Real-time fountain progress bar: `"Reconstructing: 142/150 symbols (95%)"`.
-   - Auto-decryption and prompt to save into Android `Downloads/` directory upon completion.
-3. **Settings / History Tab:**
-   - Theme toggle (Matte Black / Light / System).
-   - Log of previous transfers (file name, size, timestamp, SHA256 integrity hash).
-   - Optical tuning (target scanning FPS, camera resolution).
+   - Document picker and file inspection card.
+   - Grid layout selector: `1x1 (Standard)` or `1x2 (Dual Stream)`.
+   - High-FPS canvas QR streamer utilizing user-configured transmission FPS from `SettingsManager`.
+2. **Receive Tab (Flexible Optical Scanner):**
+   - Full-screen CameraX optical scanner viewport.
+   - Offline ML Kit multi-barcode detection analyzer handling 1 to 12 QRs per frame.
+   - Supports both simultaneous full-screen scanning and 1-by-1 zoomed scanning seamlessly.
+   - Dynamic green bounding reticles (`#238636`) drawn over all actively detected QR codes.
+   - Telemetry HUD:
+     - `Resolved: X / K symbols (Y%)` with high-contrast linear progress bar.
+     - `Codes in view: N` (live counter of QR codes visible in current exposure).
+     - `Symbols captured: TotalCount`.
+     - `Speed: SpeedKBps KB/s (SymPerSec sym/s)`.
+   - Auto-decryption and direct save to Android `Downloads/`.
+3. **Settings Tab (Persistent Optical Tuning):**
+   - Backed by `SettingsManager` (`SharedPreferences`).
+   - Theme toggle: True Matte Black (`#010409`) vs Light.
+   - Transmission Framerate slider: 8 to 30 FPS (immediately configures `SendScreen`).
+   - Camera Resolution selector: 1080p FHD (recommended for multi-QR) vs 720p HD.
+   - Transfer history with SHA-256 verification hashes.
 
 ---
 
-## 8. Monorepo Structure
+## 8. Performance Benchmarks & Targets
 
-```
-dove/
-├── cli/                 # Go CLI Engine
-│   ├── cmd/
-│   │   ├── send.go      # 'dove send' command logic
-│   │   ├── get.go       # 'dove get' command logic
-│   │   └── root.go      # Cobra/CLI initialization
-│   ├── pkg/
-│   │   ├── crypto/      # AES-256-GCM encryption & key derivation
-│   │   ├── fountain/    # Luby Transform (LT) encoder & decoder
-│   │   ├── compress/    # zstd compression routines
-│   │   └── qr/          # QR matrix generator & ANSI terminal printer
-│   └── main.go
-├── web/                 # PHP Session & Desktop Browser Engine
-│   ├── session.php      # Session lifecycle, countdown, self-destruction
-│   ├── index.php        # Routing entry point
-│   ├── player.html      # High-FPS canvas QR streamer
-│   ├── scanner.html     # Webcam optical reader interface
-│   └── assets/          # Pure CSS (GitHub matte black) and SVGs
-├── android/             # Android Studio Project
-│   ├── app/
-│   │   ├── src/main/
-│   │   │   ├── java/com/dove/app/
-│   │   │   │   ├── ui/          # Jetpack Compose screens (Send, Receive, Settings)
-│   │   │   │   ├── camera/      # CameraX analyzer pipeline
-│   │   │   │   ├── fountain/    # Kotlin fountain decoder implementation
-│   │   │   │   └── crypto/      # Android Keystore & AES decryption
-│   │   │   └── res/drawable/    # Pure SVG vector assets (No PNG slop, No Emojis)
-│   └── build.gradle.kts
-├── docs/                # Architecture diagrams and specifications
-├── agent.md             # Strict AI Agent Implementation Rules
-├── prd.md               # Product Requirements Document
-├── README.md
-└── LICENSE
-```
+| Metric | Dove v1.0 (Single QR) | Dove v2.0 (2x2 Grid) | Dove v2.1 Turbo (3x3 Matrix) |
+| :--- | :--- | :--- | :--- |
+| **Grid Cells** | 1 | 4 | **9** |
+| **Bytes / Symbol** | 320 B | 380 B | **380 B** |
+| **Frame Rate** | 14 FPS | 18 FPS | **26 FPS** |
+| **Instantaneous Throughput** | ~3.8 KB/s | ~27 KB/s | **~89–102 KB/s** |
+| **100 KB File Time** | ~30s | ~4.5s | **~1.2s** |
+| **500 KB File Time** | ~2.5m | ~20s | **~5.2s** |
+| **1 MB File Time** | ~6.5m | ~38s | **~9.8 - 11.0s** |
+| **Scanning Flexibility** | Single code only | Grid only | **Both all-at-once AND 1-by-1 sequential** |
 
 ---
 
-## 9. Security & Privacy Guarantees
-1. **Zero Attack Surface over RF:** Since no Wi-Fi, cellular, or Bluetooth interfaces are active, network sniffing, MITM, ARP poisoning, and rogue AP exploits are physically impossible.
-2. **Physical Line-of-Sight Protection:** Only devices with a clear visual line of sight to the transmitting display can receive data.
-3. **End-to-End Cryptography:** Payloads are encrypted with AES-256-GCM before symbol generation. Even if third-party cameras record the screen, payloads remain encrypted without session credentials.
-4. **Zero Telemetry:** No analytics, crash reporters, or external network requests are baked into either the CLI, PHP, or Android codebases.
+## 9. Security & Air-Gap Guarantees
+1. **Zero RF Emission:** No Wi-Fi, Bluetooth, NFC, or cellular radios utilized.
+2. **Offline ML Kit Guarantee:** Uses exclusively bundled offline model assets within the APK; zero external API calls or Google Play Services network dependencies.
+3. **End-to-End Cryptography:** AES-256-GCM authenticated encryption for all payloads.
+4. **Ephemerality:** All temporary session buffers in CLI, PHP, and Android are wiped upon transfer completion or timer expiration.

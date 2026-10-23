@@ -28,6 +28,8 @@ type SessionPayload struct {
 	FileSize    int64    `json:"file_size"`
 	TotalChunks int      `json:"total_chunks"`
 	ChunkSize   int      `json:"chunk_size"`
+	Grid        string   `json:"grid"` // "1x1", "2x2", "3x3", "4x3"
+	Fps         int      `json:"fps"`
 	ExpiresAt   int64    `json:"expires_at"` // 0 if unlimited
 	Frames      []string `json:"frames"`     // Pre-generated fountain frames in base64
 	HasPin      bool     `json:"has_pin"`
@@ -43,7 +45,9 @@ func RunSend(args []string) error {
 	var duration time.Duration
 	var pin string
 	var useTerminal bool
-	fps := 14
+	grid := "3x3"
+	fps := 26
+	chunkSizeOverride := 0
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -64,6 +68,18 @@ func RunSend(args []string) error {
 			f, err := strconv.Atoi(args[i+1])
 			if err == nil && f >= 5 && f <= 30 {
 				fps = f
+			}
+			i++
+		} else if arg == "--grid" && i+1 < len(args) {
+			g := strings.ToLower(args[i+1])
+			if g == "1x1" || g == "2x2" || g == "3x3" || g == "4x3" {
+				grid = g
+			}
+			i++
+		} else if arg == "--chunk-size" && i+1 < len(args) {
+			cs, err := strconv.Atoi(args[i+1])
+			if err == nil && cs >= 64 && cs <= 800 {
+				chunkSizeOverride = cs
 			}
 			i++
 		} else if !strings.HasPrefix(arg, "--") && filePath == "" {
@@ -133,23 +149,21 @@ func RunSend(args []string) error {
 	copy(finalPayload[4:], innerPayload)
 
 	payloadLen := len(finalPayload)
-	chunkSize := 128
-	if payloadLen > 50000 {
-		chunkSize = 256
-	}
-	if payloadLen > 200000 {
-		chunkSize = 320
+	chunkSize := fountain.CalculateOptimalChunkSize(payloadLen)
+	if chunkSizeOverride > 0 {
+		chunkSize = chunkSizeOverride
 	}
 
 	encoder := fountain.NewEncoder(sessionID, finalPayload, chunkSize)
 
 	// Pre-generate enough fountain frames to guarantee complete reconstruction
-	frameCount := int(encoder.TotalChunks)*2 + 50
-	if frameCount < 150 {
-		frameCount = 150
+	// Sized proportionally to total chunks, scaling dynamically up to 8,000 for 1MB+
+	frameCount := int(encoder.TotalChunks)*2 + 100
+	if frameCount < 300 {
+		frameCount = 300
 	}
-	if frameCount > 2000 {
-		frameCount = 2000
+	if frameCount > 8000 {
+		frameCount = 8000
 	}
 
 	frames := make([]string, frameCount)
@@ -196,6 +210,8 @@ func RunSend(args []string) error {
 		FileSize:    fileInfo.Size(),
 		TotalChunks: int(encoder.TotalChunks),
 		ChunkSize:   chunkSize,
+		Grid:        grid,
+		Fps:         fps,
 		ExpiresAt:   expiresAt,
 		Frames:      frames,
 		HasPin:      pin != "",
@@ -230,6 +246,7 @@ func RunSend(args []string) error {
 	fmt.Println("Dove: Optical Stream Active")
 	fmt.Printf("File: %s (%d bytes)\n", filepath.Base(filePath), fileInfo.Size())
 	fmt.Printf("Session ID: %d\n", sessionID)
+	fmt.Printf("Grid Layout: %s (%d FPS)\n", grid, fps)
 	fmt.Printf("Browser URL: %s\n", targetURL)
 	if duration > 0 {
 		fmt.Printf("Duration: %s (auto-destructs at %s)\n", duration, time.Unix(expiresAt, 0).Format("15:04:05"))
