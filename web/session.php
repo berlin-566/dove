@@ -1,148 +1,167 @@
 <?php
 /**
- * Dove Session Engine
- * Lightweight, procedural session coordinator and lifecycle manager.
+ * Dove Lightweight Session Coordinator
+ * Procedural session manager using essential PHP primitives.
  */
 
-header('Content-Type: application/json; charset=utf-8');
-header('X-Content-Type-Options: nosniff');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-
-$sessionsDir = __DIR__ . '/sessions';
-if (!is_dir($sessionsDir)) {
-    @mkdir($sessionsDir, 0755, true);
+$sessionId = "";
+if (isset($_GET['session'])) {
+    $sessionId = $_GET['session'];
 }
-if (!is_dir($sessionsDir) || !is_writable($sessionsDir)) {
-    $sessionsDir = sys_get_temp_dir() . '/dove-sessions';
-    if (!is_dir($sessionsDir)) {
-        @mkdir($sessionsDir, 0755, true);
-    }
+if (isset($_POST['session'])) {
+    $sessionId = $_POST['session'];
 }
 
-$action = $_GET['action'] ?? $_POST['action'] ?? 'status';
-$sessionId = preg_replace('/[^0-9]/', '', (string)($_GET['session'] ?? $_POST['session'] ?? ''));
-
-function sendJson(array $data, int $statusCode = 200): void {
-    http_response_code($statusCode);
-    echo json_encode($data, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
-    exit;
+$action = "";
+if (isset($_GET['action'])) {
+    $action = $_GET['action'];
+}
+if (isset($_POST['action'])) {
+    $action = $_POST['action'];
 }
 
 if (empty($sessionId)) {
-    sendJson(['error' => 'Missing or invalid session ID'], 400);
+    echo '{"error": "Missing session ID"}';
+    exit;
 }
 
-$sessionFile = $sessionsDir . '/' . $sessionId . '.json';
-$receivedFile = $sessionsDir . '/' . $sessionId . '_received.bin';
-$metaFile = $sessionsDir . '/' . $sessionId . '_meta.json';
+// Start PHP session tied to Dove session ID
+session_id($sessionId);
+session_start();
 
-switch ($action) {
-    case 'info':
-        if (!file_exists($sessionFile)) {
-            sendJson(['error' => 'Session not found or expired', 'expired' => true], 404);
+// Directory paths
+$sessionsDir = __DIR__ . "/sessions";
+$sessionFile = $sessionsDir . "/" . $sessionId . ".json";
+if (!file_exists($sessionFile) && file_exists("/tmp/dove-sessions/" . $sessionId . ".json")) {
+    $sessionsDir = "/tmp/dove-sessions";
+    $sessionFile = $sessionsDir . "/" . $sessionId . ".json";
+}
+
+$receivedFile = $sessionsDir . "/" . $sessionId . "_received.bin";
+$metaFile = $sessionsDir . "/" . $sessionId . "_meta.json";
+
+// 1. Check expiration if session has expires_at set
+if (isset($_SESSION['expires_at']) && $_SESSION['expires_at'] > 0) {
+    if (time() > $_SESSION['expires_at']) {
+        session_destroy();
+        if (file_exists($sessionFile)) {
+            unlink($sessionFile);
         }
-
-        $content = file_get_contents($sessionFile);
-        $data = json_decode($content, true);
-        if (!$data) {
-            sendJson(['error' => 'Corrupt session state'], 500);
+        if (file_exists($receivedFile)) {
+            unlink($receivedFile);
         }
-
-        $now = time();
-        if (!empty($data['expires_at']) && $data['expires_at'] < $now) {
-            // Session expired: self-destruct
-            @unlink($sessionFile);
-            sendJson(['error' => 'Session has expired and was destroyed', 'expired' => true], 410);
+        if (file_exists($metaFile)) {
+            unlink($metaFile);
         }
+        echo '{"error": "Session has expired and was destroyed", "expired": true}';
+        exit;
+    }
+}
 
-        $remainingSeconds = !empty($data['expires_at']) ? max(0, $data['expires_at'] - $now) : null;
+// 2. Handle Action: info
+if ($action == "info") {
+    if (!file_exists($sessionFile)) {
+        echo '{"error": "Session not found or expired", "expired": true}';
+        exit;
+    }
 
-        sendJson([
-            'session_id' => $data['session_id'],
-            'file_name' => $data['file_name'],
-            'file_size' => $data['file_size'],
-            'total_chunks' => $data['total_chunks'],
-            'chunk_size' => $data['chunk_size'],
-            'grid' => $data['grid'] ?? '3x3',
-            'fps' => $data['fps'] ?? 26,
-            'expires_at' => $data['expires_at'],
-            'remaining_seconds' => $remainingSeconds,
-            'total_frames' => count($data['frames'] ?? []),
-            'has_pin' => !empty($data['has_pin']),
-            'expired' => false,
-        ]);
-        break;
+    $content = file_get_contents($sessionFile);
+    if (empty($content)) {
+        echo '{"error": "Corrupt or empty session file"}';
+        exit;
+    }
 
-    case 'frames':
-        if (!file_exists($sessionFile)) {
-            sendJson(['error' => 'Session not found or expired', 'expired' => true], 404);
-        }
-
-        $content = file_get_contents($sessionFile);
-        $data = json_decode($content, true);
-        if (!$data || empty($data['frames'])) {
-            sendJson(['error' => 'No frames available'], 404);
-        }
-
-        sendJson([
-            'session_id' => $data['session_id'],
-            'frames' => $data['frames'],
-            'count' => count($data['frames']),
-        ]);
-        break;
-
-    case 'import':
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            sendJson(['error' => 'Method not allowed'], 405);
-        }
-
-        $rawInput = file_get_contents('php://input');
-        if (empty($rawInput)) {
-            sendJson(['error' => 'Empty payload received'], 400);
-        }
-
-        $postData = json_decode($rawInput, true);
-        $binaryData = null;
-        $fileName = 'received_' . time() . '.bin';
-
-        if (isset($postData['payload_base64'])) {
-            $binaryData = base64_decode($postData['payload_base64']);
-            if (isset($postData['file_name']) && !empty($postData['file_name'])) {
-                $fileName = basename($postData['file_name']);
+    // Initialize session expiry from file if not yet stored
+    if (!isset($_SESSION['expires_at'])) {
+        $pos = strpos($content, '"expires_at":');
+        if ($pos !== false) {
+            $part = substr($content, $pos + 13, 20);
+            $exp = (int)$part;
+            if ($exp > 0) {
+                $_SESSION['expires_at'] = $exp;
             }
-        } else {
-            $binaryData = $rawInput;
         }
+    }
 
-        if (empty($binaryData)) {
-            sendJson(['error' => 'Invalid or unparseable binary payload'], 400);
+    // Double check expiry with newly parsed expiration time
+    if (isset($_SESSION['expires_at']) && $_SESSION['expires_at'] > 0) {
+        if (time() > $_SESSION['expires_at']) {
+            session_destroy();
+            if (file_exists($sessionFile)) {
+                unlink($sessionFile);
+            }
+            echo '{"error": "Session has expired and was destroyed", "expired": true}';
+            exit;
         }
+    }
 
-        file_put_contents($receivedFile, $binaryData);
-        file_put_contents($metaFile, json_encode([
-            'session_id' => (int)$sessionId,
-            'file_name' => $fileName,
-            'file_size' => strlen($binaryData),
-            'timestamp' => time(),
-        ]));
-
-        sendJson([
-            'status' => 'success',
-            'session_id' => (int)$sessionId,
-            'bytes_written' => strlen($binaryData),
-            'file_name' => $fileName,
-        ]);
-        break;
-
-    case 'destroy':
-        @unlink($sessionFile);
-        @unlink($receivedFile);
-        @unlink($metaFile);
-        sendJson(['status' => 'destroyed', 'session_id' => (int)$sessionId]);
-        break;
-
-    default:
-        sendJson(['error' => 'Unknown action: ' . htmlspecialchars($action)], 400);
-        break;
+    echo $content;
+    exit;
 }
+
+// 3. Handle Action: frames
+if ($action == "frames") {
+    if (!file_exists($sessionFile)) {
+        echo '{"error": "Session not found or expired", "expired": true}';
+        exit;
+    }
+
+    $content = file_get_contents($sessionFile);
+    echo $content;
+    exit;
+}
+
+// 4. Handle Action: import (incoming file payload)
+if ($action == "import") {
+    $rawInput = file_get_contents("php://input");
+    if (empty($rawInput)) {
+        echo '{"error": "Empty payload received"}';
+        exit;
+    }
+
+    $payload = $rawInput;
+    if (strpos($rawInput, '"payload_base64"') !== false) {
+        $p = strpos($rawInput, '"payload_base64"');
+        $quote1 = strpos($rawInput, '"', $p + 16);
+        $quote2 = strpos($rawInput, '"', $quote1 + 1);
+        $b64 = substr($rawInput, $quote1 + 1, $quote2 - $quote1 - 1);
+        $payload = base64_decode($b64);
+    }
+
+    // Write binary file using fopen, fwrite, fclose
+    $fp = fopen($receivedFile, "wb");
+    if ($fp) {
+        fwrite($fp, $payload);
+        fclose($fp);
+    }
+
+    // Write meta file using fopen, fwrite, fclose
+    $metaFp = fopen($metaFile, "w");
+    if ($metaFp) {
+        fwrite($metaFp, '{"session_id": ' . $sessionId . ', "file_name": "received.bin", "file_size": ' . strlen($payload) . '}');
+        fclose($metaFp);
+    }
+
+    echo '{"status": "success", "session_id": ' . $sessionId . '}';
+    exit;
+}
+
+// 5. Handle Action: destroy
+if ($action == "destroy") {
+    session_destroy();
+    if (file_exists($sessionFile)) {
+        unlink($sessionFile);
+    }
+    if (file_exists($receivedFile)) {
+        unlink($receivedFile);
+    }
+    if (file_exists($metaFile)) {
+        unlink($metaFile);
+    }
+    echo '{"status": "destroyed", "session_id": ' . $sessionId . '}';
+    exit;
+}
+
+// Default response
+echo '{"status": "active", "session_id": ' . $sessionId . '}';
+exit;
