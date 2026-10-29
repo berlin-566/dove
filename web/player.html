@@ -357,8 +357,13 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
         document.getElementById('grid-display').innerText = numCells === 1 ? 'Single (1 QR)' : `${gridType} (${numCells} QRs)`;
         document.getElementById('fps-display').innerText = `${fps} FPS (${fps * numCells} sym/s)`;
 
-        if (info.remaining_seconds !== null) {
+        if (info.remaining_seconds !== null && info.remaining_seconds !== undefined) {
           remainingSeconds = info.remaining_seconds;
+          updateTimerDisplay();
+          setInterval(tickTimer, 1000);
+        } else if (info.expires_at && info.expires_at > 0) {
+          const nowSec = Math.floor(Date.now() / 1000);
+          remainingSeconds = Math.max(0, info.expires_at - nowSec);
           updateTimerDisplay();
           setInterval(tickTimer, 1000);
         } else {
