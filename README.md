@@ -16,19 +16,6 @@ Install Dove using the automated installation command:
 curl -fsSL https://raw.githubusercontent.com/berlin-566/dove/main/install.sh | bash
 ```
 
-The installer will prompt you to choose an installation source:
-
-```
-==================================================
- Dove Installation Manager
-==================================================
-Select installation source:
-  1) Latest Release (Recommended - precompiled standalone binary)
-  2) Main Branch (Build from source via latest commit)
-
-Enter choice [1-2] (default: 1):
-```
-
 - **Option 1 (Latest Release - Recommended):** Downloads the precompiled, standalone binary (`dove-linux-amd64`, `dove-darwin-arm64`, etc.) matching your operating system and CPU architecture.
 - **Option 2 (Main Branch):** Fetches the latest source code from GitHub and compiles the binary locally using the Go toolchain.
 
@@ -83,6 +70,7 @@ dove get
 
 ---
 
+<!-- 
 ## Project Architecture
 
 ```
@@ -117,6 +105,4 @@ dove/
 
 ---
 
-## License
-
-MIT License. See [LICENSE](./LICENSE) for details.
+-->
